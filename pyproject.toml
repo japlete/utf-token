@@ -1,0 +1,19 @@
+[project]
+name = "utf-token"
+version = "0.1.0"
+description = "LLM-friendly random byte sequence decoder"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.2.0",
+    "pandas>=3.0.1",
+    "ruff>=0.15.6",
+    "tiktoken>=0.12.0",
+    "ty>=0.0.23",
+]
+
+[tool.uv]
+exclude-newer = "14 days"

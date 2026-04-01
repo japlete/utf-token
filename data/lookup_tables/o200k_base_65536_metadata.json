@@ -1,0 +1,10 @@
+{
+  "source_vocab": "data/token_vocab/o200k_base.tiktoken",
+  "subset_size": 65536,
+  "entry_count": 65536,
+  "index_bits": 16,
+  "index_byte_order": "big",
+  "index_lookup_rule": "Zero-based line number equals the unsigned 16-bit value decoded from the source bytes.",
+  "selection_order": "sorted by (len(token_text), rank)",
+  "tokens_file": "o200k_base_65536_tokens.txt"
+}

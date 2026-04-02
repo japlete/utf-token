@@ -1,0 +1,2 @@
+include data/lookup_tables/*.json
+include data/lookup_tables/*.txt

@@ -11,7 +11,8 @@ from pathlib import Path
 
 DEFAULT_INPUT_PATH = Path("data/token_vocab/o200k_base.tiktoken")
 DEFAULT_OUTPUT_DIR = Path("data/lookup_tables")
-DEFAULT_SUBSET_SIZE = 1 << 16
+DEFAULT_PAIR_TABLE_SIZE = 1 << 16
+DEFAULT_TAIL_TABLE_SIZE = 1 << 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,10 +36,16 @@ def parse_args() -> argparse.Namespace:
         help="Path to the downloaded .tiktoken vocab file.",
     )
     parser.add_argument(
-        "--subset-size",
+        "--pair-table-size",
         type=int,
-        default=DEFAULT_SUBSET_SIZE,
+        default=DEFAULT_PAIR_TABLE_SIZE,
         help="Target subset size for 2-byte mappings. Defaults to 2^16.",
+    )
+    parser.add_argument(
+        "--tail-table-size",
+        type=int,
+        default=DEFAULT_TAIL_TABLE_SIZE,
+        help="Target subset size for odd trailing byte mappings. Defaults to 2^8.",
     )
     parser.add_argument(
         "--output-dir",
@@ -145,57 +152,83 @@ def format_example_mapping(index: int, entry: TokenEntry) -> str:
     )
 
 
-def select_subset(candidates: list[TokenEntry], subset_size: int) -> list[TokenEntry]:
-    return sorted(candidates, key=lambda entry: (len(entry.token_text), entry.rank))[
-        :subset_size
-    ]
+def select_subset(
+    candidates: list[TokenEntry],
+    *,
+    pair_table_size: int,
+    tail_table_size: int,
+) -> tuple[list[TokenEntry], list[TokenEntry]]:
+    ordered_candidates = sorted(candidates, key=lambda entry: (len(entry.token_text), entry.rank))
+    pair_entries = ordered_candidates[:pair_table_size]
+    tail_entries = ordered_candidates[pair_table_size : pair_table_size + tail_table_size]
+    return pair_entries, tail_entries
 
 
-def output_file_stem(input_path: Path, subset_size: int) -> str:
-    return f"{input_path.stem}_{subset_size}"
+def output_file_stem(input_path: Path, pair_table_size: int) -> str:
+    return f"{input_path.stem}_{pair_table_size}"
 
 
 def write_lookup_table(
     *,
     input_path: Path,
     output_dir: Path,
-    subset_size: int,
-    provisional_subset: list[TokenEntry],
-) -> tuple[Path, Path]:
-    if len(provisional_subset) != subset_size:
+    pair_table_size: int,
+    tail_table_size: int,
+    pair_entries: list[TokenEntry],
+    tail_entries: list[TokenEntry],
+) -> tuple[Path, Path, Path]:
+    if len(pair_entries) != pair_table_size:
         raise ValueError(
             "Cannot write lookup table: provisional subset does not cover the "
-            f"requested {subset_size:,} indices."
+            f"requested {pair_table_size:,} 2-byte indices."
+        )
+
+    if len(tail_entries) != tail_table_size:
+        raise ValueError(
+            "Cannot write lookup table: provisional subset does not cover the "
+            f"requested {tail_table_size:,} trailing-byte indices."
         )
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    table_stem = output_file_stem(input_path, subset_size)
-    tokens_path = output_dir / f"{table_stem}_tokens.txt"
+    table_stem = output_file_stem(input_path, pair_table_size)
+    pair_tokens_path = output_dir / f"{table_stem}_tokens.txt"
+    tail_tokens_path = output_dir / f"{table_stem}_tail_{tail_table_size}_tokens.txt"
     metadata_path = output_dir / f"{table_stem}_metadata.json"
 
-    tokens_payload = "\n".join(entry.token_text for entry in provisional_subset) + "\n"
-    tokens_path.write_text(tokens_payload, encoding="utf-8")
+    pair_tokens_payload = "\n".join(entry.token_text for entry in pair_entries) + "\n"
+    pair_tokens_path.write_text(pair_tokens_payload, encoding="utf-8")
+
+    tail_tokens_payload = "\n".join(entry.token_text for entry in tail_entries) + "\n"
+    tail_tokens_path.write_text(tail_tokens_payload, encoding="utf-8")
 
     metadata = {
         "source_vocab": input_path.as_posix(),
-        "subset_size": subset_size,
-        "entry_count": len(provisional_subset),
-        "index_bits": 16,
-        "index_byte_order": "big",
-        "index_lookup_rule": (
+        "pair_table_size": pair_table_size,
+        "pair_entry_count": len(pair_entries),
+        "pair_index_bits": 16,
+        "pair_index_byte_order": "big",
+        "pair_lookup_rule": (
             "Zero-based line number equals the unsigned 16-bit value decoded from "
             "the source bytes."
         ),
+        "tail_table_size": tail_table_size,
+        "tail_entry_count": len(tail_entries),
+        "tail_index_bits": 8,
+        "tail_lookup_rule": (
+            "Zero-based line number equals the unsigned 8-bit value decoded from "
+            "the odd trailing source byte."
+        ),
         "selection_order": "sorted by (len(token_text), rank)",
-        "tokens_file": tokens_path.name,
+        "pair_tokens_file": pair_tokens_path.name,
+        "tail_tokens_file": tail_tokens_path.name,
     }
     metadata_path.write_text(
         json.dumps(metadata, indent=2, ensure_ascii=True) + "\n",
         encoding="utf-8",
     )
 
-    return tokens_path, metadata_path
+    return pair_tokens_path, tail_tokens_path, metadata_path
 
 
 def print_summary(
@@ -205,11 +238,13 @@ def print_summary(
     total_tokens: int,
     counts: Counter[str],
     candidates: list[TokenEntry],
-    subset_size: int,
-    provisional_subset: list[TokenEntry],
+    pair_table_size: int,
+    tail_table_size: int,
+    pair_entries: list[TokenEntry],
+    tail_entries: list[TokenEntry],
     examples: int,
     seed: int,
-    written_files: tuple[Path, Path] | None = None,
+    written_files: tuple[Path, Path, Path] | None = None,
 ) -> None:
     print(f"Input vocab: {input_path}")
     print(f"Total tokens loaded: {total_tokens}")
@@ -235,26 +270,27 @@ def print_summary(
     candidate_count = len(candidates)
     print(f"Total candidate token subset: {candidate_count}")
 
-    if candidate_count >= subset_size:
-        overflow = candidate_count - subset_size
+    required_entries = pair_table_size + tail_table_size
+    if candidate_count >= required_entries:
+        overflow = candidate_count - required_entries
         print(
-            f"Feasible for a {subset_size:,}-token 2-byte table: yes "
+            "Feasible for paired and trailing tables: yes "
             f"({overflow:,} extra candidates)"
         )
     else:
-        shortage = subset_size - candidate_count
+        shortage = required_entries - candidate_count
         print(
-            f"Feasible for a {subset_size:,}-token 2-byte table: no "
+            "Feasible for paired and trailing tables: no "
             f"({shortage:,} candidates short)"
         )
     print()
 
-    if not provisional_subset:
+    if not pair_entries:
         print("No example mappings available because the candidate subset is empty.")
         return
 
     longest_entry = max(
-        provisional_subset, key=lambda entry: (len(entry.token_text), entry.rank)
+        pair_entries + tail_entries, key=lambda entry: (len(entry.token_text), entry.rank)
     )
     print(
         "Longest token in the provisional subset: "
@@ -263,33 +299,42 @@ def print_summary(
     )
     print()
 
-    sample_count = min(examples, len(provisional_subset))
-    indices = random.Random(seed).sample(range(len(provisional_subset)), k=sample_count)
+    sample_count = min(examples, len(pair_entries))
+    indices = random.Random(seed).sample(range(len(pair_entries)), k=sample_count)
 
     print(
-        "Example mappings using the provisional subset "
+        "Example 2-byte mappings using the provisional subset "
         "(shortest eligible tokens first, rank tiebreaker):"
     )
     for index in indices:
-        print(f"  - {format_example_mapping(index, provisional_subset[index])}")
+        print(f"  - {format_example_mapping(index, pair_entries[index])}")
+
+    if tail_entries:
+        print()
+        print("Example trailing-byte mappings:")
+        tail_indices = random.Random(seed).sample(range(len(tail_entries)), k=min(examples, len(tail_entries)))
+        for index in tail_indices:
+            print(f"  - {index:#04x} -> rank {tail_entries[index].rank}: {tail_entries[index].token_text!r}")
 
     if written_files is None:
-        table_stem = output_file_stem(input_path, subset_size)
+        table_stem = output_file_stem(input_path, pair_table_size)
         print()
         print(
-            "Lookup table not written because the candidate subset does not cover "
-            f"all {subset_size:,} indices."
+            "Lookup tables not written because the candidate subset does not cover "
+            f"all {required_entries:,} required indices."
         )
         print(
             "If the subset becomes feasible, files will be written to "
-            f"{output_dir / f'{table_stem}_tokens.txt'} and "
+            f"{output_dir / f'{table_stem}_tokens.txt'}, "
+            f"{output_dir / f'{table_stem}_tail_{tail_table_size}_tokens.txt'}, and "
             f"{output_dir / f'{table_stem}_metadata.json'}"
         )
         return
 
-    tokens_path, metadata_path = written_files
+    pair_tokens_path, tail_tokens_path, metadata_path = written_files
     print()
-    print(f"Wrote ordered token list: {tokens_path}")
+    print(f"Wrote ordered 2-byte token list: {pair_tokens_path}")
+    print(f"Wrote ordered trailing-byte token list: {tail_tokens_path}")
     print(f"Wrote table metadata: {metadata_path}")
 
 
@@ -298,15 +343,21 @@ def main() -> int:
     raw_contents = args.input_path.read_bytes()
     vocab_entries = decode_vocab_lines(raw_contents)
     candidates, counts = collect_candidates(vocab_entries)
-    provisional_subset = select_subset(candidates, args.subset_size)
-    written_files: tuple[Path, Path] | None = None
+    pair_entries, tail_entries = select_subset(
+        candidates,
+        pair_table_size=args.pair_table_size,
+        tail_table_size=args.tail_table_size,
+    )
+    written_files: tuple[Path, Path, Path] | None = None
 
-    if len(provisional_subset) == args.subset_size:
+    if len(pair_entries) == args.pair_table_size and len(tail_entries) == args.tail_table_size:
         written_files = write_lookup_table(
             input_path=args.input_path,
             output_dir=args.output_dir,
-            subset_size=args.subset_size,
-            provisional_subset=provisional_subset,
+            pair_table_size=args.pair_table_size,
+            tail_table_size=args.tail_table_size,
+            pair_entries=pair_entries,
+            tail_entries=tail_entries,
         )
 
     print_summary(
@@ -315,8 +366,10 @@ def main() -> int:
         total_tokens=len(vocab_entries),
         counts=counts,
         candidates=candidates,
-        subset_size=args.subset_size,
-        provisional_subset=provisional_subset,
+        pair_table_size=args.pair_table_size,
+        tail_table_size=args.tail_table_size,
+        pair_entries=pair_entries,
+        tail_entries=tail_entries,
         examples=args.examples,
         seed=args.seed,
         written_files=written_files,

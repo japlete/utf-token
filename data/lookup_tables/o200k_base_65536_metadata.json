@@ -1,10 +1,15 @@
 {
   "source_vocab": "data/token_vocab/o200k_base.tiktoken",
-  "subset_size": 65536,
-  "entry_count": 65536,
-  "index_bits": 16,
-  "index_byte_order": "big",
-  "index_lookup_rule": "Zero-based line number equals the unsigned 16-bit value decoded from the source bytes.",
+  "pair_table_size": 65536,
+  "pair_entry_count": 65536,
+  "pair_index_bits": 16,
+  "pair_index_byte_order": "big",
+  "pair_lookup_rule": "Zero-based line number equals the unsigned 16-bit value decoded from the source bytes.",
+  "tail_table_size": 256,
+  "tail_entry_count": 256,
+  "tail_index_bits": 8,
+  "tail_lookup_rule": "Zero-based line number equals the unsigned 8-bit value decoded from the odd trailing source byte.",
   "selection_order": "sorted by (len(token_text), rank)",
-  "tokens_file": "o200k_base_65536_tokens.txt"
+  "pair_tokens_file": "o200k_base_65536_tokens.txt",
+  "tail_tokens_file": "o200k_base_65536_tail_256_tokens.txt"
 }

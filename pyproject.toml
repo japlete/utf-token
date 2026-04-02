@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "utf-token"
 version = "0.1.0"
@@ -11,9 +15,20 @@ dev = [
     "ipykernel>=7.2.0",
     "pandas>=3.0.1",
     "ruff>=0.15.6",
+    "setuptools>=80",
     "tiktoken>=0.12.0",
     "ty>=0.0.23",
 ]
 
 [tool.uv]
 exclude-newer = "14 days"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+utf_token = ["py.typed"]

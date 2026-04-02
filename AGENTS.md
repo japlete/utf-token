@@ -20,6 +20,7 @@ This repo consists of a library (planned for Python and Typescript) that convert
 - Never use plain `python file.py`, always use `uv run file.py`.
 - Never use `hasattr` or `getattr`, always use static checks, such as `uv run ruff check` and `uv run ty check`.
 - Avoid try-except blocks for offline scripts if possible.
+- You can introduce breaking changes. The library is unpublished and the repo private.
 
 ## Repo structure
 
@@ -41,3 +42,7 @@ The current produced lookup table is `data/lookup_tables/o200k_base_65536_tokens
 1. Simple library (importable functions, minimal deps)
 2. Expand interface: include class to store executed mappings to perform exact encoding in reverse. The class could dump mappings to a json or expose a dictionary for the user to handle storage.
 3. Typescript npm package.
+
+### Status
+
+Implementing stage 1. Repo still private, library unpublished.

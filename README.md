@@ -16,7 +16,8 @@ Each function accepts either a single value or an iterable of values. Scalar inp
 a single encoded `str`; iterable inputs return a lazy iterator of encoded `str` values.
 
 Odd-length byte payloads are supported by using a separate 256-entry tail lookup for the
-final byte.
+final byte. That tail table reserves the 256 shortest eligible tokens first, and the
+65,536-entry pair table uses the next slice of the same ordering.
 
 ## Current limitation
 

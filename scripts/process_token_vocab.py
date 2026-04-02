@@ -159,8 +159,8 @@ def select_subset(
     tail_table_size: int,
 ) -> tuple[list[TokenEntry], list[TokenEntry]]:
     ordered_candidates = sorted(candidates, key=lambda entry: (len(entry.token_text), entry.rank))
-    pair_entries = ordered_candidates[:pair_table_size]
-    tail_entries = ordered_candidates[pair_table_size : pair_table_size + tail_table_size]
+    tail_entries = ordered_candidates[:tail_table_size]
+    pair_entries = ordered_candidates[tail_table_size : tail_table_size + pair_table_size]
     return pair_entries, tail_entries
 
 
@@ -220,6 +220,11 @@ def write_lookup_table(
             "the odd trailing source byte."
         ),
         "selection_order": "sorted by (len(token_text), rank)",
+        "tail_selection_rule": "first tail_table_size entries from the selection order",
+        "pair_selection_rule": (
+            "entries immediately after the reserved tail slice, continuing for "
+            "pair_table_size entries"
+        ),
         "pair_tokens_file": pair_tokens_path.name,
         "tail_tokens_file": tail_tokens_path.name,
     }
@@ -304,7 +309,7 @@ def print_summary(
 
     print(
         "Example 2-byte mappings using the provisional subset "
-        "(shortest eligible tokens first, rank tiebreaker):"
+        "(after reserving the shortest eligible tail tokens first):"
     )
     for index in indices:
         print(f"  - {format_example_mapping(index, pair_entries[index])}")

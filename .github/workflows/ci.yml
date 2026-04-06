@@ -1,0 +1,157 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Sync dev environment
+        run: uv sync --locked --group dev
+      - name: Ruff
+        run: uv run ruff check
+      - name: Ty
+        run: uv run ty check
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.14"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Sync dev environment
+        run: uv sync --locked --group dev
+      - name: Unit tests
+        run: uv run -m unittest discover -s tests
+
+  build:
+    runs-on: ubuntu-latest
+    needs:
+      - lint
+      - unit-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Build distributions
+        run: uv build --out-dir dist --clear
+      - name: Check distribution metadata
+        run: uvx --from twine twine check dist/*
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-artifacts
+          path: dist/*
+          if-no-files-found: error
+
+  smoke-wheel:
+    runs-on: ubuntu-latest
+    needs:
+      - build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: min-supported
+            python-version: "3.10"
+            resolution: lowest-direct
+          - lane: latest-supported
+            python-version: "3.14"
+            resolution: highest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-artifacts
+          path: dist
+      - name: Compile runtime requirements
+        run: >
+          uv pip compile pyproject.toml
+          --no-sources
+          --python-version ${{ matrix.python-version }}
+          --resolution ${{ matrix.resolution }}
+          --output-file .github/runtime-${{ matrix.lane }}.txt
+          --no-header
+          --no-annotate
+      - name: Create smoke-test environment
+        run: uv venv --python ${{ matrix.python-version }} .venv-smoke
+      - name: Install wheel under test
+        run: >
+          uv pip install
+          --strict
+          --python .venv-smoke/bin/python
+          --requirements .github/runtime-${{ matrix.lane }}.txt
+          dist/*.whl
+      - name: Smoke test installed wheel
+        run: >
+          uv run
+          --no-project
+          --python .venv-smoke/bin/python
+          --script scripts/smoke_installed_package.py
+
+  smoke-sdist:
+    runs-on: ubuntu-latest
+    needs:
+      - build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-artifacts
+          path: dist
+      - name: Compile runtime requirements
+        run: >
+          uv pip compile pyproject.toml
+          --no-sources
+          --python-version 3.10
+          --resolution lowest-direct
+          --output-file .github/runtime-sdist.txt
+          --no-header
+          --no-annotate
+      - name: Create smoke-test environment
+        run: uv venv --python 3.10 .venv-sdist
+      - name: Install sdist under test
+        run: >
+          uv pip install
+          --strict
+          --python .venv-sdist/bin/python
+          --requirements .github/runtime-sdist.txt
+          dist/*.tar.gz
+      - name: Smoke test installed sdist
+        run: >
+          uv run
+          --no-project
+          --python .venv-sdist/bin/python
+          --script scripts/smoke_installed_package.py

@@ -45,4 +45,4 @@ The current produced lookup table is `data/lookup_tables/o200k_base_65536_tokens
 
 ### Status
 
-Implementing stage 1. Repo still private, library unpublished.
+Implemented stage 1. Repo still private, library unpublished.

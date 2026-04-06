@@ -7,17 +7,29 @@ name = "utf-token"
 version = "0.1.0"
 description = "LLM-friendly random byte sequence decoder"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Typing :: Typed",
+]
 dependencies = []
 
 [dependency-groups]
 dev = [
-    "ipykernel>=7.2.0",
-    "pandas>=3.0.1",
     "ruff>=0.15.6",
     "setuptools>=80",
-    "tiktoken>=0.12.0",
     "ty>=0.0.23",
+]
+offline = [
+    "ipykernel>=7.2.0",
+    "pandas>=3.0.1; python_version >= '3.11'",
+    "tiktoken>=0.12.0",
 ]
 
 [tool.uv]

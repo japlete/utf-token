@@ -1,0 +1,113 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Verify tag matches project version
+        run: >
+          uv run --no-project python -c
+          "import os, tomllib; from pathlib import Path;
+          version = tomllib.loads(Path('pyproject.toml').read_text())['project']['version'];
+          tag = os.environ['GITHUB_REF_NAME'];
+          expected = f'v{version}';
+          print(f'tag={tag} version={version}');
+          raise SystemExit(0 if tag == expected else f'Tag {tag!r} does not match version {expected!r}')"
+      - name: Sync dev environment
+        run: uv sync --locked --group dev
+      - name: Ruff
+        run: uv run ruff check
+      - name: Ty
+        run: uv run ty check
+      - name: Unit tests
+        run: uv run -m unittest discover -s tests
+      - name: Build distributions
+        run: uv build --out-dir dist --clear
+      - name: Check distribution metadata
+        run: uvx --from twine twine check dist/*
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-artifacts
+          path: dist/*
+          if-no-files-found: error
+
+  publish-testpypi:
+    runs-on: ubuntu-latest
+    needs:
+      - build
+    permissions:
+      id-token: write
+    environment: testpypi
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-artifacts
+          path: dist
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          repository-url: https://test.pypi.org/legacy/
+
+  smoke-test-testpypi:
+    runs-on: ubuntu-latest
+    needs:
+      - publish-testpypi
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Create smoke-test environment
+        run: uv venv --python 3.10 .venv-testpypi
+      - name: Install tagged package from TestPyPI
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: >
+          uv pip install
+          --python .venv-testpypi/bin/python
+          --default-index https://pypi.org/simple
+          --index https://test.pypi.org/simple
+          "utf-token==${RELEASE_VERSION#v}"
+      - name: Smoke test TestPyPI install
+        run: >
+          uv run
+          --no-project
+          --python .venv-testpypi/bin/python
+          --script scripts/smoke_installed_package.py
+
+  publish-pypi:
+    runs-on: ubuntu-latest
+    needs:
+      - smoke-test-testpypi
+    permissions:
+      id-token: write
+    environment: pypi
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-artifacts
+          path: dist
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

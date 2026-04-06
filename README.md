@@ -7,9 +7,9 @@ using a fixed subset of the `o200k_base` vocabulary.
 
 The published package targets Python 3.10 and newer.
 
-## V1 API
+## Python API
 
-The first library version is intentionally forward-only. It supports:
+The library supports these forward helpers:
 
 - `frombytes`
 - `fromhex`
@@ -23,11 +23,20 @@ Odd-length byte payloads are supported by using a separate 256-entry tail lookup
 final byte. That tail table reserves the 256 shortest eligible tokens first, and the
 65,536-entry pair table uses the next slice of the same ordering.
 
-## Current limitation
+## Reversible Mappings
 
-V1 does not implement `tobytes` or other reverse helpers. Concatenated token strings are
-not reliably self-delimiting under `o200k_base`, so exact reversal is deferred to the next
-roadmap stage where executed mappings will be stored explicitly.
+`IdTokenBiMap` is a stateful companion to the standalone forward helpers.
+It records encoded strings produced so far so they can be reversed later with:
+
+- `tobytes`
+- `tohex`
+- `tobase64`
+- `touuid`
+
+The reversible class also supports `to_dict` / `to_json` exports plus `from_dict` /
+`from_json` imports for offline storage. When a newly encoded value would collide with an
+existing stored string, the class deterministically remaps the output so reverse lookups
+stay exact.
 
 ## Publishing
 

@@ -10,7 +10,7 @@ This repo consists of a library (planned for Python and Typescript) that convert
   - uv (package manager), ruff (linter), ty (type checker)
   - ipykernel
   - pandas
-  - tiktoken
+  - tiktoken, sentencepiece
 
 ## Rules
 
@@ -36,14 +36,31 @@ For now, we work only with the o200k OpenAI token vocabulary. We take a subset o
 
 The 2^16 subset is alnum + '_' char, excluding the longest tokens to match the specified set size. The logic is to avoid special characters in JSON and Markdown, which are typical LLM I/O formats. Also, we want the LLM to clearly distinguish the resulting random string sequences from the surrounding context, so special characters used commonly to delimit table columns, sequences and strings are excluded.
 
-The current produced lookup table is `data/lookup_tables/o200k_base_65536_tokens.txt`. It has 1 row per token in a single column. For a lookup, each 2-byte pair should be converted to an unsigned 16-bit integer, and use that to index the table.
+The current default lookup table is `data/lookup_tables/o200k_base_65536_tokens.txt`. It has 1 row per token in a single column. For a lookup, each 2-byte pair should be converted to an unsigned 16-bit integer, and use that to index the table.
+
+If an input byte sequence ends in a single byte, a 'tail' table is used, which consists of only 2^8 tokens (distinct from the larger table).
+
+## Standalone functions vs IdTokenBiMap class
+
+Both the standalone functions and the class implement:
+
+- `frombytes`
+- `fromhex`
+- `frombase64`
+- `fromuuid`
+
+But the standalone functions are forward-only. From the resulting string of concatenated tokens, you can't map the original bytes. Since in most cases an LLM would write a transformed identifier back to the application, and this in turns needs to retrieve the original identifier, the class is necessary to achieve this. The class stored an intermal map with collision resolution and implements:
+
+- `tobytes`
+- `tohex`
+- `tobase64`
+- `touuid`
 
 ## Roadmap
 
-1. Simple library (importable functions, minimal deps)
-2. Expand interface: include class to store executed mappings to perform exact encoding in reverse. The class could dump mappings to a json or expose a dictionary for the user to handle storage.
-3. Typescript npm package.
+1. Python library. Currently implementing arguments and options.
+2. Typescript npm package. This will begin once the Python library is done.
 
-### Status
+### Release status
 
-Implemented stage 1. Repo still private, library unpublished.
+Repo still private, library unpublished.

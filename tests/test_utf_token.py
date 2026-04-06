@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import unittest
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from typing import cast
 from uuid import UUID
 
-from utf_token import frombase64, frombytes, fromhex, fromuuid
+from utf_token import IdTokenBiMap, frombase64, frombytes, fromhex, fromuuid
 from utf_token._tables import DEFAULT_VOCAB, VocabName, pair_table, supported_vocabs, tail_table
 
 
@@ -36,7 +37,10 @@ class UtfTokenTests(unittest.TestCase):
 
     def test_frombytes_supports_gemma4_vocab(self) -> None:
         self.assertEqual(frombytes(b"\x00\x00", vocab="gemma4"), GEMMA4_PAIR_TABLE[0x0000])
-        self.assertEqual(frombytes(b"\x12\x34\xab", vocab="gemma4"), GEMMA4_PAIR_TABLE[0x1234] + GEMMA4_TAIL_TABLE[0xAB])
+        self.assertEqual(
+            frombytes(b"\x12\x34\xab", vocab="gemma4"),
+            GEMMA4_PAIR_TABLE[0x1234] + GEMMA4_TAIL_TABLE[0xAB],
+        )
 
     def test_frombytes_iterable_is_lazy_iterator(self) -> None:
         seen: list[str] = []
@@ -67,7 +71,10 @@ class UtfTokenTests(unittest.TestCase):
         self.assertEqual(list(result), [PAIR_TABLE[0x0000], PAIR_TABLE[0x0001]])
 
     def test_fromhex_supports_gemma4_vocab(self) -> None:
-        self.assertEqual(fromhex("1234ab", vocab="gemma4"), GEMMA4_PAIR_TABLE[0x1234] + GEMMA4_TAIL_TABLE[0xAB])
+        self.assertEqual(
+            fromhex("1234ab", vocab="gemma4"),
+            GEMMA4_PAIR_TABLE[0x1234] + GEMMA4_TAIL_TABLE[0xAB],
+        )
 
     def test_frombase64_supports_str_and_bytes(self) -> None:
         expected = frombytes(b"\x00\x01")
@@ -111,6 +118,175 @@ class UtfTokenTests(unittest.TestCase):
     def test_invalid_vocab_raises_value_error(self) -> None:
         with self.assertRaises(ValueError):
             frombytes(b"\x00\x00", vocab=cast(VocabName, "invalid"))
+
+
+class IdTokenBiMapTests(unittest.TestCase):
+    def test_round_trips_scalar_bytes(self) -> None:
+        codec = IdTokenBiMap()
+        encoded = codec.frombytes(b"\x12\x34\xab")
+        self.assertEqual(codec.tobytes(encoded), b"\x12\x34\xab")
+        self.assertEqual(codec.tohex(encoded), "1234ab")
+        self.assertEqual(codec.tobase64(encoded), "EjSr")
+
+    def test_round_trips_format_adapters(self) -> None:
+        codec = IdTokenBiMap()
+        zero_uuid = UUID("00000000-0000-0000-0000-000000000000")
+
+        hex_encoded = codec.fromhex("00 01 ab")
+        base64_encoded = codec.frombase64("AAE=")
+        uuid_encoded = codec.fromuuid(zero_uuid)
+
+        self.assertEqual(codec.tobytes(hex_encoded), bytes.fromhex("0001ab"))
+        self.assertEqual(codec.tohex(hex_encoded), "0001ab")
+        self.assertEqual(codec.tobase64(base64_encoded), "AAE=")
+        self.assertEqual(codec.touuid(uuid_encoded), zero_uuid)
+
+    def test_missing_reverse_lookup_returns_none(self) -> None:
+        codec = IdTokenBiMap()
+        self.assertIsNone(codec.tobytes("missing"))
+        self.assertIsNone(codec.tohex("missing"))
+        self.assertIsNone(codec.tobase64("missing"))
+        self.assertIsNone(codec.touuid("missing"))
+
+    def test_forward_iterable_is_lazy_iterator(self) -> None:
+        codec = IdTokenBiMap()
+        seen: list[str] = []
+
+        def items() -> Iterator[bytes]:
+            seen.append("first")
+            yield b"\x00\x00"
+            seen.append("second")
+            yield b"\x00\x01"
+
+        result = codec.frombytes(items())
+        self.assertIsInstance(result, Iterator)
+        self.assertEqual(seen, [])
+        self.assertEqual(next(result), PAIR_TABLE[0x0000])
+        self.assertEqual(seen, ["first"])
+        self.assertEqual(next(result), PAIR_TABLE[0x0001])
+        self.assertEqual(seen, ["first", "second"])
+
+    def test_reverse_iterable_is_lazy_iterator(self) -> None:
+        codec = IdTokenBiMap()
+        first = codec.frombytes(b"\x00\x00")
+        second = codec.frombytes(b"\x00\x01")
+        seen: list[str] = []
+
+        def items() -> Iterator[str]:
+            seen.append("first")
+            yield first
+            seen.append("second")
+            yield second
+
+        result = codec.tobytes(items())
+        self.assertIsInstance(result, Iterator)
+        self.assertEqual(seen, [])
+        self.assertEqual(next(result), b"\x00\x00")
+        self.assertEqual(seen, ["first"])
+        self.assertEqual(next(result), b"\x00\x01")
+        self.assertEqual(seen, ["first", "second"])
+
+    def test_reuses_same_output_for_repeated_bytes_and_vocab(self) -> None:
+        codec = IdTokenBiMap()
+        first = codec.frombytes(b"\x00\x01\x27")
+        second = codec.frombytes(b"\x00\x01\x27")
+        self.assertEqual(first, second)
+        self.assertEqual(codec.tobytes(first), b"\x00\x01\x27")
+
+    def test_remaps_known_collision(self) -> None:
+        codec = IdTokenBiMap()
+        pair_value = bytes.fromhex("1f08")
+        colliding_triplet = bytes.fromhex("000127")
+
+        stage1_pair = frombytes(pair_value)
+        stage1_triplet = frombytes(colliding_triplet)
+        self.assertEqual(stage1_pair, stage1_triplet)
+
+        first = codec.frombytes(pair_value)
+        second = codec.frombytes(colliding_triplet)
+
+        self.assertEqual(first, stage1_pair)
+        self.assertNotEqual(second, stage1_triplet)
+        self.assertEqual(codec.tobytes(first), pair_value)
+        self.assertEqual(codec.tobytes(second), colliding_triplet)
+        self.assertEqual(codec.frombytes(colliding_triplet), second)
+
+    def test_supports_mixed_vocabs(self) -> None:
+        codec = IdTokenBiMap()
+        raw = b"\x00\x01"
+
+        o200k_encoded = codec.frombytes(raw, vocab="o200k")
+        gemma4_encoded = codec.frombytes(raw, vocab="gemma4")
+
+        self.assertEqual(codec.tobytes(o200k_encoded), raw)
+        self.assertEqual(codec.tobytes(gemma4_encoded), raw)
+
+        payload = codec.to_dict()
+        mappings = cast(dict[str, object], payload["mappings"])
+        self.assertIsInstance(mappings, dict)
+        if o200k_encoded == gemma4_encoded:
+            shared = cast(dict[str, object], mappings[o200k_encoded])
+            self.assertIsInstance(shared, dict)
+            self.assertEqual(shared["vocabs"], ["gemma4", "o200k"])
+        else:
+            o200k_entry = cast(dict[str, object], mappings[o200k_encoded])
+            gemma4_entry = cast(dict[str, object], mappings[gemma4_encoded])
+            self.assertIsInstance(o200k_entry, dict)
+            self.assertIsInstance(gemma4_entry, dict)
+            self.assertEqual(o200k_entry["vocabs"], ["o200k"])
+            self.assertEqual(gemma4_entry["vocabs"], ["gemma4"])
+
+    def test_dict_and_json_round_trip(self) -> None:
+        codec = IdTokenBiMap()
+        o200k_encoded = codec.frombytes(b"\x00\x01", vocab="o200k")
+        gemma4_encoded = codec.frombytes(b"\x00\x01", vocab="gemma4")
+
+        clone = IdTokenBiMap.from_dict(codec.to_dict())
+        self.assertEqual(clone.tobytes(o200k_encoded), b"\x00\x01")
+        self.assertEqual(clone.tobytes(gemma4_encoded), b"\x00\x01")
+        self.assertEqual(clone.frombytes(b"\x00\x01", vocab="o200k"), o200k_encoded)
+        self.assertEqual(clone.frombytes(b"\x00\x01", vocab="gemma4"), gemma4_encoded)
+
+        json_clone = IdTokenBiMap.from_json(codec.to_json(indent=2))
+        self.assertEqual(json_clone.tobytes(o200k_encoded), b"\x00\x01")
+        self.assertEqual(json_clone.tobytes(gemma4_encoded), b"\x00\x01")
+
+    def test_import_rejects_conflicting_forward_mapping(self) -> None:
+        with self.assertRaises(ValueError):
+            IdTokenBiMap.from_dict(
+                {
+                    "format_version": 1,
+                    "mappings": {
+                        "first": {
+                            "original_hex": "0001",
+                            "vocabs": ["o200k"],
+                        },
+                        "second": {
+                            "original_hex": "0001",
+                            "vocabs": ["o200k"],
+                        },
+                    },
+                }
+            )
+
+    def test_touuid_rejects_non_uuid_lengths(self) -> None:
+        codec = IdTokenBiMap()
+        encoded = codec.frombytes(b"\x00\x01")
+        with self.assertRaises(ValueError):
+            codec.touuid(encoded)
+
+    def test_thread_safe_per_instance(self) -> None:
+        codec = IdTokenBiMap()
+        codec.frombytes(bytes.fromhex("1f08"))
+
+        def encode_collision() -> str:
+            return codec.frombytes(bytes.fromhex("000127"))
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            results = list(executor.map(lambda _: encode_collision(), range(32)))
+
+        self.assertEqual(len(set(results)), 1)
+        self.assertEqual(codec.tobytes(results[0]), bytes.fromhex("000127"))
 
 
 if __name__ == "__main__":

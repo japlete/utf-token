@@ -28,22 +28,33 @@ def _encode_bytes_single(data: bytes, *, vocab: VocabName = DEFAULT_VOCAB) -> st
     return "".join(encoded_parts)
 
 
+def _decode_hex_bytes(data: str) -> bytes:
+    return bytes.fromhex(data)
+
+
+def _decode_base64_bytes(data: str | bytes) -> bytes:
+    payload = data.encode("ascii") if isinstance(data, str) else data
+    try:
+        return base64.b64decode(payload, validate=True)
+    except binascii.Error as exc:
+        raise ValueError("Invalid base64 input") from exc
+
+
+def _decode_uuid_bytes(data: UUID | str) -> bytes:
+    value = data if isinstance(data, UUID) else UUID(data)
+    return value.bytes
+
+
 def _fromhex_single(data: str, *, vocab: VocabName = DEFAULT_VOCAB) -> str:
-    return _encode_bytes_single(bytes.fromhex(data), vocab=vocab)
+    return _encode_bytes_single(_decode_hex_bytes(data), vocab=vocab)
 
 
 def _frombase64_single(data: str | bytes, *, vocab: VocabName = DEFAULT_VOCAB) -> str:
-    payload = data.encode("ascii") if isinstance(data, str) else data
-    try:
-        decoded = base64.b64decode(payload, validate=True)
-    except binascii.Error as exc:
-        raise ValueError("Invalid base64 input") from exc
-    return _encode_bytes_single(decoded, vocab=vocab)
+    return _encode_bytes_single(_decode_base64_bytes(data), vocab=vocab)
 
 
 def _fromuuid_single(data: UUID | str, *, vocab: VocabName = DEFAULT_VOCAB) -> str:
-    value = data if isinstance(data, UUID) else UUID(data)
-    return _encode_bytes_single(value.bytes, vocab=vocab)
+    return _encode_bytes_single(_decode_uuid_bytes(data), vocab=vocab)
 
 
 @overload

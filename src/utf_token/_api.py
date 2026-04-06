@@ -6,15 +6,15 @@ from collections.abc import Iterable, Iterator
 from typing import TypeAlias, overload
 from uuid import UUID
 
-from ._tables import pair_table, tail_table
+from ._tables import DEFAULT_VOCAB, VocabName, pair_table, tail_table
 
 Base64Value: TypeAlias = str | bytes
 UUIDValue: TypeAlias = UUID | str
 
 
-def _encode_bytes_single(data: bytes) -> str:
-    pair_tokens = pair_table()
-    trailing_tokens = tail_table()
+def _encode_bytes_single(data: bytes, *, vocab: VocabName = DEFAULT_VOCAB) -> str:
+    pair_tokens = pair_table(vocab)
+    trailing_tokens = tail_table(vocab)
     encoded_parts: list[str] = []
     pair_limit = len(data) - (len(data) % 2)
 
@@ -28,33 +28,35 @@ def _encode_bytes_single(data: bytes) -> str:
     return "".join(encoded_parts)
 
 
-def _fromhex_single(data: str) -> str:
-    return _encode_bytes_single(bytes.fromhex(data))
+def _fromhex_single(data: str, *, vocab: VocabName = DEFAULT_VOCAB) -> str:
+    return _encode_bytes_single(bytes.fromhex(data), vocab=vocab)
 
 
-def _frombase64_single(data: str | bytes) -> str:
+def _frombase64_single(data: str | bytes, *, vocab: VocabName = DEFAULT_VOCAB) -> str:
     payload = data.encode("ascii") if isinstance(data, str) else data
     try:
         decoded = base64.b64decode(payload, validate=True)
     except binascii.Error as exc:
         raise ValueError("Invalid base64 input") from exc
-    return _encode_bytes_single(decoded)
+    return _encode_bytes_single(decoded, vocab=vocab)
 
 
-def _fromuuid_single(data: UUID | str) -> str:
+def _fromuuid_single(data: UUID | str, *, vocab: VocabName = DEFAULT_VOCAB) -> str:
     value = data if isinstance(data, UUID) else UUID(data)
-    return _encode_bytes_single(value.bytes)
+    return _encode_bytes_single(value.bytes, vocab=vocab)
 
 
 @overload
-def frombytes(data: bytes, /) -> str: ...
+def frombytes(data: bytes, /, *, vocab: VocabName = DEFAULT_VOCAB) -> str: ...
 
 
 @overload
-def frombytes(data: Iterable[bytes], /) -> Iterator[str]: ...
+def frombytes(data: Iterable[bytes], /, *, vocab: VocabName = DEFAULT_VOCAB) -> Iterator[str]: ...
 
 
-def frombytes(data: bytes | Iterable[bytes], /) -> str | Iterator[str]:
+def frombytes(
+    data: bytes | Iterable[bytes], /, *, vocab: VocabName = DEFAULT_VOCAB
+) -> str | Iterator[str]:
     """Encode raw bytes into the UTF-token string representation.
 
     Pass a single ``bytes`` value to get one encoded ``str`` back. Pass an
@@ -63,25 +65,27 @@ def frombytes(data: bytes | Iterable[bytes], /) -> str | Iterator[str]:
 
     Args:
         data: Raw bytes to encode, or an iterable of byte strings.
+        vocab: Lookup table vocabulary. Supported values are ``"o200k"`` and
+            ``"gemma4"``.
 
     Returns:
         A single encoded string for scalar input, or a lazy iterator of encoded
         strings for iterable input.
     """
     if isinstance(data, bytes):
-        return _encode_bytes_single(data)
-    return (_encode_bytes_single(item) for item in data)
+        return _encode_bytes_single(data, vocab=vocab)
+    return (_encode_bytes_single(item, vocab=vocab) for item in data)
 
 
 @overload
-def fromhex(data: str, /) -> str: ...
+def fromhex(data: str, /, *, vocab: VocabName = DEFAULT_VOCAB) -> str: ...
 
 
 @overload
-def fromhex(data: Iterable[str], /) -> Iterator[str]: ...
+def fromhex(data: Iterable[str], /, *, vocab: VocabName = DEFAULT_VOCAB) -> Iterator[str]: ...
 
 
-def fromhex(data: str | Iterable[str], /) -> str | Iterator[str]:
+def fromhex(data: str | Iterable[str], /, *, vocab: VocabName = DEFAULT_VOCAB) -> str | Iterator[str]:
     """Encode hexadecimal input into the UTF-token string representation.
 
     This mirrors :meth:`bytes.fromhex`, so whitespace inside each hex string is
@@ -89,25 +93,31 @@ def fromhex(data: str | Iterable[str], /) -> str | Iterator[str]:
 
     Args:
         data: A hex string such as ``"0012ab"`` or an iterable of hex strings.
+        vocab: Lookup table vocabulary. Supported values are ``"o200k"`` and
+            ``"gemma4"``.
 
     Returns:
         A single encoded string for scalar input, or a lazy iterator of encoded
         strings for iterable input.
     """
     if isinstance(data, str):
-        return _fromhex_single(data)
-    return (_fromhex_single(item) for item in data)
+        return _fromhex_single(data, vocab=vocab)
+    return (_fromhex_single(item, vocab=vocab) for item in data)
 
 
 @overload
-def frombase64(data: Base64Value, /) -> str: ...
+def frombase64(data: Base64Value, /, *, vocab: VocabName = DEFAULT_VOCAB) -> str: ...
 
 
 @overload
-def frombase64(data: Iterable[Base64Value], /) -> Iterator[str]: ...
+def frombase64(
+    data: Iterable[Base64Value], /, *, vocab: VocabName = DEFAULT_VOCAB
+) -> Iterator[str]: ...
 
 
-def frombase64(data: Base64Value | Iterable[Base64Value], /) -> str | Iterator[str]:
+def frombase64(
+    data: Base64Value | Iterable[Base64Value], /, *, vocab: VocabName = DEFAULT_VOCAB
+) -> str | Iterator[str]:
     """Encode base64-decoded bytes into the UTF-token string representation.
 
     Both ASCII ``str`` and ``bytes`` inputs are accepted for base64 payloads.
@@ -116,25 +126,29 @@ def frombase64(data: Base64Value | Iterable[Base64Value], /) -> str | Iterator[s
 
     Args:
         data: A base64 string or bytes payload, or an iterable of them.
+        vocab: Lookup table vocabulary. Supported values are ``"o200k"`` and
+            ``"gemma4"``.
 
     Returns:
         A single encoded string for scalar input, or a lazy iterator of encoded
         strings for iterable input.
     """
     if isinstance(data, (str, bytes)):
-        return _frombase64_single(data)
-    return (_frombase64_single(item) for item in data)
+        return _frombase64_single(data, vocab=vocab)
+    return (_frombase64_single(item, vocab=vocab) for item in data)
 
 
 @overload
-def fromuuid(data: UUIDValue, /) -> str: ...
+def fromuuid(data: UUIDValue, /, *, vocab: VocabName = DEFAULT_VOCAB) -> str: ...
 
 
 @overload
-def fromuuid(data: Iterable[UUIDValue], /) -> Iterator[str]: ...
+def fromuuid(data: Iterable[UUIDValue], /, *, vocab: VocabName = DEFAULT_VOCAB) -> Iterator[str]: ...
 
 
-def fromuuid(data: UUIDValue | Iterable[UUIDValue], /) -> str | Iterator[str]:
+def fromuuid(
+    data: UUIDValue | Iterable[UUIDValue], /, *, vocab: VocabName = DEFAULT_VOCAB
+) -> str | Iterator[str]:
     """Encode UUID values into the UTF-token string representation.
 
     UUID objects and canonical UUID strings are both accepted. Pass an iterable
@@ -142,11 +156,13 @@ def fromuuid(data: UUIDValue | Iterable[UUIDValue], /) -> str | Iterator[str]:
 
     Args:
         data: A UUID object, a UUID string, or an iterable of either form.
+        vocab: Lookup table vocabulary. Supported values are ``"o200k"`` and
+            ``"gemma4"``.
 
     Returns:
         A single encoded string for scalar input, or a lazy iterator of encoded
         strings for iterable input.
     """
     if isinstance(data, (UUID, str)):
-        return _fromuuid_single(data)
-    return (_fromuuid_single(item) for item in data)
+        return _fromuuid_single(data, vocab=vocab)
+    return (_fromuuid_single(item, vocab=vocab) for item in data)

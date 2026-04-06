@@ -2,28 +2,51 @@ from __future__ import annotations
 
 import argparse
 import base64
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
+import sentencepiece as spm
 
-ENCODING_URLS = {
-    "o200k_base": "https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken",
-    "cl100k_base": "https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken",
+
+@dataclass(frozen=True, slots=True)
+class VocabSource:
+    download_url: str
+    source_format: str
+    raw_filename: str
+
+
+VOCAB_SOURCES = {
+    "o200k_base": VocabSource(
+        download_url="https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken",
+        source_format="tiktoken",
+        raw_filename="o200k_base.tiktoken",
+    ),
+    "cl100k_base": VocabSource(
+        download_url="https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken",
+        source_format="tiktoken",
+        raw_filename="cl100k_base.tiktoken",
+    ),
+    "gemma4": VocabSource(
+        download_url="https://storage.googleapis.com/gemma-data/tokenizers/tokenizer_gemma4.model",
+        source_format="sentencepiece",
+        raw_filename="tokenizer_gemma4.model",
+    ),
 }
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Download OpenAI tokenizer vocab files and materialize a decoded local vocab list."
+            "Download tokenizer vocab files and materialize a decoded local vocab list."
         )
     )
     parser.add_argument(
         "--encoding",
         action="append",
-        choices=sorted(ENCODING_URLS),
-        help="Encoding(s) to download. Defaults to o200k_base.",
+        choices=sorted(VOCAB_SOURCES),
+        help="Tokenizer source(s) to download. Defaults to o200k_base.",
     )
     parser.add_argument(
         "--output-dir",
@@ -50,7 +73,7 @@ def download_bytes(url: str, timeout: float) -> bytes:
         raise RuntimeError(f"Could not download {url}: {exc.reason}") from exc
 
 
-def decode_vocab_lines(raw_contents: bytes) -> list[tuple[int, bytes]]:
+def decode_tiktoken_vocab_lines(raw_contents: bytes) -> list[tuple[int, bytes]]:
     entries: list[tuple[int, bytes]] = []
 
     for line_number, raw_line in enumerate(raw_contents.splitlines(), start=1):
@@ -84,6 +107,25 @@ def decode_vocab_lines(raw_contents: bytes) -> list[tuple[int, bytes]]:
     return sorted(entries, key=lambda entry: entry[0])
 
 
+def decode_sentencepiece_vocab(raw_contents: bytes) -> list[tuple[int, bytes]]:
+    processor = spm.SentencePieceProcessor()
+    processor.LoadFromSerializedProto(raw_contents)
+    return [
+        (rank, processor.IdToPiece(rank).encode("utf-8"))
+        for rank in range(processor.GetPieceSize())
+    ]
+
+
+def decode_vocab_entries(
+    raw_contents: bytes, *, source_format: str
+) -> list[tuple[int, bytes]]:
+    if source_format == "tiktoken":
+        return decode_tiktoken_vocab_lines(raw_contents)
+    if source_format == "sentencepiece":
+        return decode_sentencepiece_vocab(raw_contents)
+    raise ValueError(f"Unsupported source format: {source_format}")
+
+
 def render_token(token_bytes: bytes) -> str:
     try:
         return repr(token_bytes.decode("utf-8"))
@@ -91,14 +133,19 @@ def render_token(token_bytes: bytes) -> str:
         return repr(token_bytes)
 
 
-def write_outputs(encoding: str, raw_contents: bytes, output_dir: Path) -> tuple[Path, Path, int]:
+def write_outputs(
+    source_name: str, raw_contents: bytes, output_dir: Path
+) -> tuple[Path, Path, int]:
+    source = VOCAB_SOURCES[source_name]
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    raw_path = output_dir / f"{encoding}.tiktoken"
+    raw_path = output_dir / source.raw_filename
     raw_path.write_bytes(raw_contents)
 
-    decoded_entries = decode_vocab_lines(raw_contents)
-    vocab_path = output_dir / f"{encoding}_vocab_list.txt"
+    decoded_entries = decode_vocab_entries(
+        raw_contents, source_format=source.source_format
+    )
+    vocab_path = output_dir / f"{raw_path.stem}_vocab_list.txt"
 
     with vocab_path.open("w", encoding="utf-8") as handle:
         for rank, token_bytes in decoded_entries:
@@ -112,10 +159,10 @@ def main() -> int:
     encodings = args.encoding or ["o200k_base"]
 
     for encoding in encodings:
-        url = ENCODING_URLS[encoding]
-        raw_contents = download_bytes(url, timeout=args.timeout)
+        source = VOCAB_SOURCES[encoding]
+        raw_contents = download_bytes(source.download_url, timeout=args.timeout)
         raw_path, vocab_path, entry_count = write_outputs(
-            encoding=encoding,
+            source_name=encoding,
             raw_contents=raw_contents,
             output_dir=args.output_dir,
         )

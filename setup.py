@@ -11,6 +11,9 @@ PACKAGE_DATA_FILENAMES = (
     "o200k_base_65536_metadata.json",
     "o200k_base_65536_tail_256_tokens.txt",
     "o200k_base_65536_tokens.txt",
+    "tokenizer_gemma4_65536_metadata.json",
+    "tokenizer_gemma4_65536_tail_256_tokens.txt",
+    "tokenizer_gemma4_65536_tokens.txt",
 )
 
 

@@ -8,6 +8,8 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+import sentencepiece as spm
+
 
 DEFAULT_INPUT_PATH = Path("data/token_vocab/o200k_base.tiktoken")
 DEFAULT_OUTPUT_DIR = Path("data/lookup_tables")
@@ -25,15 +27,16 @@ class TokenEntry:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Apply first-pass character exclusions to a downloaded tokenizer vocab and "
-            "preview a provisional 16-bit token subset."
+            "Apply first-pass character exclusions to a downloaded tokenizer vocab "
+            "(.tiktoken or SentencePiece .model) and preview a provisional 16-bit "
+            "token subset."
         )
     )
     parser.add_argument(
         "--input-path",
         type=Path,
         default=DEFAULT_INPUT_PATH,
-        help="Path to the downloaded .tiktoken vocab file.",
+        help="Path to the downloaded tokenizer vocab file.",
     )
     parser.add_argument(
         "--pair-table-size",
@@ -68,7 +71,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def decode_vocab_lines(raw_contents: bytes) -> list[tuple[int, bytes]]:
+def decode_tiktoken_vocab_lines(raw_contents: bytes) -> list[tuple[int, bytes]]:
     entries: list[tuple[int, bytes]] = []
 
     for line_number, raw_line in enumerate(raw_contents.splitlines(), start=1):
@@ -101,6 +104,26 @@ def decode_vocab_lines(raw_contents: bytes) -> list[tuple[int, bytes]]:
         entries.append((rank, token_bytes))
 
     return sorted(entries, key=lambda entry: entry[0])
+
+
+def decode_sentencepiece_model(input_path: Path) -> list[tuple[int, bytes]]:
+    processor = spm.SentencePieceProcessor()
+    processor.Load(str(input_path))
+    return [
+        (rank, processor.IdToPiece(rank).encode("utf-8"))
+        for rank in range(processor.GetPieceSize())
+    ]
+
+
+def load_vocab_entries(input_path: Path) -> list[tuple[int, bytes]]:
+    if input_path.suffix == ".tiktoken":
+        return decode_tiktoken_vocab_lines(input_path.read_bytes())
+    if input_path.suffix == ".model":
+        return decode_sentencepiece_model(input_path)
+    raise ValueError(
+        "Unsupported vocab format. Expected a .tiktoken or SentencePiece .model file, "
+        f"got {input_path.name!r}"
+    )
 
 
 def classify_token(token_bytes: bytes) -> tuple[str, str | None]:
@@ -158,7 +181,9 @@ def select_subset(
     pair_table_size: int,
     tail_table_size: int,
 ) -> tuple[list[TokenEntry], list[TokenEntry]]:
-    ordered_candidates = sorted(candidates, key=lambda entry: (len(entry.token_text), entry.rank))
+    ordered_candidates = sorted(
+        candidates, key=lambda entry: (len(entry.token_text), entry.rank)
+    )
     tail_entries = ordered_candidates[:tail_table_size]
     pair_entries = ordered_candidates[tail_table_size : tail_table_size + pair_table_size]
     return pair_entries, tail_entries
@@ -345,8 +370,7 @@ def print_summary(
 
 def main() -> int:
     args = parse_args()
-    raw_contents = args.input_path.read_bytes()
-    vocab_entries = decode_vocab_lines(raw_contents)
+    vocab_entries = load_vocab_entries(args.input_path)
     candidates, counts = collect_candidates(vocab_entries)
     pair_entries, tail_entries = select_subset(
         candidates,

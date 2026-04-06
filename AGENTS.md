@@ -19,6 +19,7 @@ This repo consists of a library (planned for Python and Typescript) that convert
 - Never use `pip install`, always use `uv add`.
 - Never use plain `python file.py`, always use `uv run file.py`.
 - Never use `hasattr` or `getattr`, always use static checks, such as `uv run ruff check` and `uv run ty check`.
+- When changing which source or data files are packaged, locally verify the build with `uv build --no-build-isolation --sdist --wheel`, then install the built wheel into a fresh virtualenv and run `uv run --no-project --python <venv>/bin/python --script scripts/smoke_installed_package.py`.
 - Avoid try-except blocks for offline scripts if possible.
 - You can introduce breaking changes. The library is unpublished and the repo private.
 

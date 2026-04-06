@@ -36,3 +36,5 @@ publishes tagged versions to TestPyPI first, runs an install smoke test against 
 and only then publishes the same artifacts to PyPI.
 
 See `docs/releasing.md` for the local preflight commands and repository setup steps.
+
+For local development install all deps with `uv sync --all-groups`

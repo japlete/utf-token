@@ -18,6 +18,8 @@ The library supports these forward helpers:
 
 Each function accepts either a single value or an iterable of values. Scalar inputs return
 a single encoded `str`; iterable inputs return a lazy iterator of encoded `str` values.
+All forward helpers also accept `truncate_bytes=<positive int>` to limit the input bytes
+before encoding.
 
 Odd-length byte payloads are supported by using a separate 256-entry tail lookup for the
 final byte. That tail table reserves the 256 shortest eligible tokens first, and the
@@ -36,7 +38,8 @@ It records encoded strings produced so far so they can be reversed later with:
 The reversible class also supports `to_dict` / `to_json` exports plus `from_dict` /
 `from_json` imports for offline storage. When a newly encoded value would collide with an
 existing stored string, the class deterministically remaps the output so reverse lookups
-stay exact.
+stay exact. When `truncate_bytes` is used, the encoded string is derived from the
+truncated prefix, but reverse lookups still return the full original bytes.
 
 ## Publishing
 

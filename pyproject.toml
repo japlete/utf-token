@@ -28,6 +28,7 @@ dev = [
 ]
 offline = [
     "ipykernel>=7.2.0",
+    "matplotlib>=3.10.8",
     "pandas>=3.0.1; python_version >= '3.11'",
     "sentencepiece>=0.2.1",
     "tiktoken>=0.12.0",

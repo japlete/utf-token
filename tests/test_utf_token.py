@@ -224,7 +224,7 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(next(result), b"\x00\x01")
         self.assertEqual(seen, ["first", "second"])
 
-    def test_reuses_same_output_for_repeated_bytes_and_vocab(self) -> None:
+    def test_reuses_same_output_for_repeated_bytes(self) -> None:
         codec = IdTokenBiMap()
         first = codec.frombytes(b"\x00\x01\x27")
         second = codec.frombytes(b"\x00\x01\x27")
@@ -302,97 +302,65 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(codec.tobytes(first), first_raw)
         self.assertEqual(codec.tobytes(second), second_raw)
 
-    def test_supports_mixed_vocabs(self) -> None:
-        codec = IdTokenBiMap()
+    def test_constructor_uses_specified_vocab(self) -> None:
+        codec = IdTokenBiMap("gemma4")
         raw = b"\x00\x01"
-
-        o200k_encoded = codec.frombytes(raw, vocab="o200k")
-        gemma4_encoded = codec.frombytes(raw, vocab="gemma4")
-
-        self.assertEqual(codec.tobytes(o200k_encoded), raw)
-        self.assertEqual(codec.tobytes(gemma4_encoded), raw)
-
-        payload = codec.to_dict()
-        mappings = cast(dict[str, object], payload["mappings"])
-        self.assertIsInstance(mappings, dict)
-        if o200k_encoded == gemma4_encoded:
-            shared = cast(dict[str, object], mappings[o200k_encoded])
-            self.assertIsInstance(shared, dict)
-            self.assertEqual(
-                shared["encodings"],
-                [
-                    {"vocab": "gemma4", "truncate_bytes": None},
-                    {"vocab": "o200k", "truncate_bytes": None},
-                ],
-            )
-        else:
-            o200k_entry = cast(dict[str, object], mappings[o200k_encoded])
-            gemma4_entry = cast(dict[str, object], mappings[gemma4_encoded])
-            self.assertIsInstance(o200k_entry, dict)
-            self.assertIsInstance(gemma4_entry, dict)
-            self.assertEqual(
-                o200k_entry["encodings"],
-                [{"vocab": "o200k", "truncate_bytes": None}],
-            )
-            self.assertEqual(
-                gemma4_entry["encodings"],
-                [{"vocab": "gemma4", "truncate_bytes": None}],
-            )
+        encoded = codec.frombytes(raw)
+        self.assertEqual(encoded, GEMMA4_PAIR_TABLE[0x0001])
+        self.assertEqual(codec.tobytes(encoded), raw)
 
     def test_dict_and_json_round_trip(self) -> None:
         codec = IdTokenBiMap()
         raw = b"\x00\x01"
-        o200k_encoded = codec.frombytes(raw, vocab="o200k")
-        o200k_oversized = codec.frombytes(raw, vocab="o200k", truncate_bytes=5)
-        o200k_truncated = codec.frombytes(raw, vocab="o200k", truncate_bytes=1)
-        gemma4_encoded = codec.frombytes(raw, vocab="gemma4")
+        encoded = codec.frombytes(raw)
+        oversized = codec.frombytes(raw, truncate_bytes=5)
+        truncated = codec.frombytes(raw, truncate_bytes=1)
 
-        self.assertEqual(o200k_encoded, o200k_oversized)
+        self.assertEqual(encoded, oversized)
 
         payload = codec.to_dict()
         self.assertEqual(payload["format_version"], FORMAT_VERSION)
+        self.assertEqual(payload["vocab"], "o200k")
         mappings = cast(dict[str, object], payload["mappings"])
-        shared_entry = cast(dict[str, object], mappings[o200k_encoded])
+        shared_entry = cast(dict[str, object], mappings[encoded])
         self.assertEqual(
             shared_entry["encodings"],
             [
-                {"vocab": "o200k", "truncate_bytes": None},
-                {"vocab": "o200k", "truncate_bytes": 5},
+                {"truncate_bytes": None},
+                {"truncate_bytes": 5},
             ],
         )
-        truncated_entry = cast(dict[str, object], mappings[o200k_truncated])
+        truncated_entry = cast(dict[str, object], mappings[truncated])
         self.assertEqual(
             truncated_entry["encodings"],
-            [{"vocab": "o200k", "truncate_bytes": 1}],
+            [{"truncate_bytes": 1}],
         )
 
         clone = IdTokenBiMap.from_dict(payload)
-        self.assertEqual(clone.tobytes(o200k_encoded), raw)
-        self.assertEqual(clone.tobytes(o200k_truncated), raw)
-        self.assertEqual(clone.tobytes(gemma4_encoded), raw)
-        self.assertEqual(clone.frombytes(raw, vocab="o200k"), o200k_encoded)
-        self.assertEqual(clone.frombytes(raw, vocab="o200k", truncate_bytes=5), o200k_oversized)
-        self.assertEqual(clone.frombytes(raw, vocab="o200k", truncate_bytes=1), o200k_truncated)
-        self.assertEqual(clone.frombytes(raw, vocab="gemma4"), gemma4_encoded)
+        self.assertEqual(clone.tobytes(encoded), raw)
+        self.assertEqual(clone.tobytes(truncated), raw)
+        self.assertEqual(clone.frombytes(raw), encoded)
+        self.assertEqual(clone.frombytes(raw, truncate_bytes=5), oversized)
+        self.assertEqual(clone.frombytes(raw, truncate_bytes=1), truncated)
 
         json_clone = IdTokenBiMap.from_json(codec.to_json(indent=2))
-        self.assertEqual(json_clone.tobytes(o200k_encoded), raw)
-        self.assertEqual(json_clone.tobytes(o200k_truncated), raw)
-        self.assertEqual(json_clone.tobytes(gemma4_encoded), raw)
+        self.assertEqual(json_clone.tobytes(encoded), raw)
+        self.assertEqual(json_clone.tobytes(truncated), raw)
 
     def test_import_rejects_conflicting_forward_mapping(self) -> None:
         with self.assertRaises(ValueError):
             IdTokenBiMap.from_dict(
                 {
                     "format_version": FORMAT_VERSION,
+                    "vocab": "o200k",
                     "mappings": {
                         "first": {
                             "original_hex": "0001",
-                            "encodings": [{"vocab": "o200k", "truncate_bytes": None}],
+                            "encodings": [{"truncate_bytes": None}],
                         },
                         "second": {
                             "original_hex": "0001",
-                            "encodings": [{"vocab": "o200k", "truncate_bytes": None}],
+                            "encodings": [{"truncate_bytes": None}],
                         },
                     },
                 }

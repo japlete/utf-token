@@ -20,9 +20,8 @@ from ._api import (
 )
 from ._tables import DEFAULT_VOCAB, VocabName
 
-FORMAT_VERSION = 2
-EncodingConfig: TypeAlias = tuple[VocabName, int | None]
-ForwardMapKey: TypeAlias = tuple[bytes, VocabName, int | None]
+FORMAT_VERSION = 3
+ForwardMapKey: TypeAlias = tuple[bytes, int | None]
 
 
 def _validate_vocab_name(value: str) -> VocabName:
@@ -42,17 +41,16 @@ def _increment_bytes(data: bytes) -> bytes:
 @dataclass(slots=True)
 class StoredMapping:
     original_bytes: bytes
-    encodings: set[EncodingConfig]
+    encodings: set[int | None]
 
 
-def _encoding_sort_key(value: EncodingConfig) -> tuple[str, int]:
-    vocab, truncate_bytes = value
-    truncate_sort = -1 if truncate_bytes is None else truncate_bytes
-    return (vocab, truncate_sort)
+def _encoding_sort_key(value: int | None) -> int:
+    return -1 if value is None else value
 
 
 class IdTokenBiMap:
-    def __init__(self) -> None:
+    def __init__(self, vocab: VocabName = DEFAULT_VOCAB) -> None:
+        self._vocab = vocab
         self._reverse_map: dict[str, StoredMapping] = {}
         self._forward_map: dict[ForwardMapKey, str] = {}
         self._lock = RLock()
@@ -61,48 +59,45 @@ class IdTokenBiMap:
         self,
         encoded: str,
         original_bytes: bytes,
-        vocab: VocabName,
         truncate_bytes: int | None,
     ) -> str:
-        encoding = (vocab, truncate_bytes)
         mapping = self._reverse_map.get(encoded)
         if mapping is None:
             self._reverse_map[encoded] = StoredMapping(
                 original_bytes=original_bytes,
-                encodings={encoding},
+                encodings={truncate_bytes},
             )
         else:
-            mapping.encodings.add(encoding)
-        self._forward_map[(original_bytes, vocab, truncate_bytes)] = encoded
+            mapping.encodings.add(truncate_bytes)
+        self._forward_map[(original_bytes, truncate_bytes)] = encoded
         return encoded
 
     def _encode_and_store_single(
         self,
         data: bytes,
         *,
-        vocab: VocabName,
         truncate_bytes: int | None = None,
     ) -> str:
         truncate_bytes = _validate_truncate_bytes(truncate_bytes)
-        key = (data, vocab, truncate_bytes)
+        key = (data, truncate_bytes)
         with self._lock:
             cached = self._forward_map.get(key)
             if cached is not None:
                 return cached
 
             working_bytes = _truncate_input(data, truncate_bytes=truncate_bytes)
-            encoded = _encode_bytes_single(working_bytes, vocab=vocab)
+            encoded = _encode_bytes_single(working_bytes, vocab=self._vocab)
             mapping = self._reverse_map.get(encoded)
             if mapping is None or mapping.original_bytes == data:
-                return self._store_mapping(encoded, data, vocab, truncate_bytes)
+                return self._store_mapping(encoded, data, truncate_bytes)
 
             candidate = working_bytes
             while True:
                 candidate = _increment_bytes(candidate)
-                encoded = _encode_bytes_single(candidate, vocab=vocab)
+                encoded = _encode_bytes_single(candidate, vocab=self._vocab)
                 mapping = self._reverse_map.get(encoded)
                 if mapping is None or mapping.original_bytes == data:
-                    return self._store_mapping(encoded, data, vocab, truncate_bytes)
+                    return self._store_mapping(encoded, data, truncate_bytes)
 
     def _lookup_bytes_single(self, data: str) -> bytes | None:
         with self._lock:
@@ -142,11 +137,8 @@ class IdTokenBiMap:
                 mappings[encoded] = {
                     "original_hex": mapping.original_bytes.hex(),
                     "encodings": [
-                        {
-                            "vocab": vocab,
-                            "truncate_bytes": truncate_bytes,
-                        }
-                        for vocab, truncate_bytes in sorted(
+                        {"truncate_bytes": truncate_bytes}
+                        for truncate_bytes in sorted(
                             mapping.encodings,
                             key=_encoding_sort_key,
                         )
@@ -154,6 +146,7 @@ class IdTokenBiMap:
                 }
             return {
                 "format_version": FORMAT_VERSION,
+                "vocab": self._vocab,
                 "mappings": mappings,
             }
 
@@ -169,11 +162,16 @@ class IdTokenBiMap:
                 f"expected {FORMAT_VERSION}"
             )
 
+        vocab_obj = payload.get("vocab")
+        if not isinstance(vocab_obj, str):
+            raise ValueError("Mapping payload must contain a 'vocab' string")
+        vocab = _validate_vocab_name(vocab_obj)
+
         mappings_obj = payload.get("mappings")
         if not isinstance(mappings_obj, dict):
             raise ValueError("Mapping payload must contain a 'mappings' object")
 
-        instance = cls()
+        instance = cls(vocab)
 
         for encoded, entry in mappings_obj.items():
             if not isinstance(encoded, str):
@@ -191,15 +189,11 @@ class IdTokenBiMap:
                 raise ValueError(f"Mapping entry for {encoded!r} is missing 'encodings'")
 
             original_bytes = _decode_hex_bytes(original_hex)
-            encodings: set[EncodingConfig] = set()
+            encodings: set[int | None] = set()
             for item in encodings_obj:
                 if not isinstance(item, dict):
                     raise ValueError(f"Mapping entry for {encoded!r} has a non-object encoding")
                 encoding_dict = cast(dict[str, object], item)
-
-                vocab_obj = encoding_dict.get("vocab")
-                if not isinstance(vocab_obj, str):
-                    raise ValueError(f"Mapping entry for {encoded!r} is missing encoding vocab")
 
                 if "truncate_bytes" not in encoding_dict:
                     raise ValueError(
@@ -210,8 +204,7 @@ class IdTokenBiMap:
                     raise ValueError(
                         f"Mapping entry for {encoded!r} has a non-integer truncate_bytes"
                     )
-                truncate_bytes = _validate_truncate_bytes(truncate_obj)
-                encodings.add((_validate_vocab_name(vocab_obj), truncate_bytes))
+                encodings.add(_validate_truncate_bytes(truncate_obj))
 
             if not encodings:
                 raise ValueError(f"Mapping entry for {encoded!r} must list at least one encoding")
@@ -220,14 +213,13 @@ class IdTokenBiMap:
                 original_bytes=original_bytes,
                 encodings=set(encodings),
             )
-            for vocab, truncate_bytes in encodings:
-                key = (original_bytes, vocab, truncate_bytes)
+            for truncate_bytes in encodings:
+                key = (original_bytes, truncate_bytes)
                 existing = instance._forward_map.get(key)
                 if existing is not None and existing != encoded:
                     raise ValueError(
                         "Conflicting mapping import for "
-                        f"{original_hex!r} under vocab {vocab!r} and "
-                        f"truncate_bytes={truncate_bytes!r}"
+                        f"{original_hex!r} with truncate_bytes={truncate_bytes!r}"
                     )
                 instance._forward_map[key] = encoded
 
@@ -246,7 +238,6 @@ class IdTokenBiMap:
         data: bytes,
         /,
         *,
-        vocab: VocabName = DEFAULT_VOCAB,
         truncate_bytes: int | None = None,
     ) -> str: ...
 
@@ -256,7 +247,6 @@ class IdTokenBiMap:
         data: Iterable[bytes],
         /,
         *,
-        vocab: VocabName = DEFAULT_VOCAB,
         truncate_bytes: int | None = None,
     ) -> Iterator[str]: ...
 
@@ -265,13 +255,12 @@ class IdTokenBiMap:
         data: bytes | Iterable[bytes],
         /,
         *,
-        vocab: VocabName = DEFAULT_VOCAB,
         truncate_bytes: int | None = None,
     ) -> str | Iterator[str]:
         if isinstance(data, bytes):
-            return self._encode_and_store_single(data, vocab=vocab, truncate_bytes=truncate_bytes)
+            return self._encode_and_store_single(data, truncate_bytes=truncate_bytes)
         return (
-            self._encode_and_store_single(item, vocab=vocab, truncate_bytes=truncate_bytes)
+            self._encode_and_store_single(item, truncate_bytes=truncate_bytes)
             for item in data
         )
 
@@ -281,7 +270,6 @@ class IdTokenBiMap:
         data: str,
         /,
         *,
-        vocab: VocabName = DEFAULT_VOCAB,
         truncate_bytes: int | None = None,
     ) -> str: ...
 
@@ -291,7 +279,6 @@ class IdTokenBiMap:
         data: Iterable[str],
         /,
         *,
-        vocab: VocabName = DEFAULT_VOCAB,
         truncate_bytes: int | None = None,
     ) -> Iterator[str]: ...
 
@@ -300,19 +287,16 @@ class IdTokenBiMap:
         data: str | Iterable[str],
         /,
         *,
-        vocab: VocabName = DEFAULT_VOCAB,
         truncate_bytes: int | None = None,
     ) -> str | Iterator[str]:
         if isinstance(data, str):
             return self._encode_and_store_single(
                 _decode_hex_bytes(data),
-                vocab=vocab,
                 truncate_bytes=truncate_bytes,
             )
         return (
             self._encode_and_store_single(
                 _decode_hex_bytes(item),
-                vocab=vocab,
                 truncate_bytes=truncate_bytes,
             )
             for item in data
@@ -324,7 +308,6 @@ class IdTokenBiMap:
         data: Base64Value,
         /,
         *,
-        vocab: VocabName = DEFAULT_VOCAB,
         truncate_bytes: int | None = None,
     ) -> str: ...
 
@@ -334,7 +317,6 @@ class IdTokenBiMap:
         data: Iterable[Base64Value],
         /,
         *,
-        vocab: VocabName = DEFAULT_VOCAB,
         truncate_bytes: int | None = None,
     ) -> Iterator[str]: ...
 
@@ -343,19 +325,16 @@ class IdTokenBiMap:
         data: Base64Value | Iterable[Base64Value],
         /,
         *,
-        vocab: VocabName = DEFAULT_VOCAB,
         truncate_bytes: int | None = None,
     ) -> str | Iterator[str]:
         if isinstance(data, (str, bytes)):
             return self._encode_and_store_single(
                 _decode_base64_bytes(data),
-                vocab=vocab,
                 truncate_bytes=truncate_bytes,
             )
         return (
             self._encode_and_store_single(
                 _decode_base64_bytes(item),
-                vocab=vocab,
                 truncate_bytes=truncate_bytes,
             )
             for item in data
@@ -367,7 +346,6 @@ class IdTokenBiMap:
         data: UUIDValue,
         /,
         *,
-        vocab: VocabName = DEFAULT_VOCAB,
         truncate_bytes: int | None = None,
     ) -> str: ...
 
@@ -377,7 +355,6 @@ class IdTokenBiMap:
         data: Iterable[UUIDValue],
         /,
         *,
-        vocab: VocabName = DEFAULT_VOCAB,
         truncate_bytes: int | None = None,
     ) -> Iterator[str]: ...
 
@@ -386,19 +363,16 @@ class IdTokenBiMap:
         data: UUIDValue | Iterable[UUIDValue],
         /,
         *,
-        vocab: VocabName = DEFAULT_VOCAB,
         truncate_bytes: int | None = None,
     ) -> str | Iterator[str]:
         if isinstance(data, (UUID, str)):
             return self._encode_and_store_single(
                 _decode_uuid_bytes(data),
-                vocab=vocab,
                 truncate_bytes=truncate_bytes,
             )
         return (
             self._encode_and_store_single(
                 _decode_uuid_bytes(item),
-                vocab=vocab,
                 truncate_bytes=truncate_bytes,
             )
             for item in data

@@ -9,8 +9,8 @@
   "tail_entry_count": 256,
   "tail_index_bits": 8,
   "tail_lookup_rule": "Zero-based line number equals the unsigned 8-bit value decoded from the odd trailing source byte.",
-  "selection_order": "sorted by (len(token_text), rank)",
-  "tail_selection_rule": "first tail_table_size entries from the selection order",
+  "selection_order": "single-char [0-9A-Za-z] first in fixed ASCII sequence, then rank order",
+  "tail_selection_rule": "first tail_table_size entries from selection_order",
   "pair_selection_rule": "entries immediately after the reserved tail slice, continuing for pair_table_size entries",
   "pair_tokens_file": "o200k_base_65536_tokens.txt",
   "tail_tokens_file": "o200k_base_65536_tail_256_tokens.txt"

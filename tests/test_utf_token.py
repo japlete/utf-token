@@ -119,9 +119,11 @@ class UtfTokenTests(unittest.TestCase):
         self.assertEqual(len(GEMMA4_PAIR_TABLE), 1 << 16)
         self.assertEqual(len(GEMMA4_TAIL_TABLE), 1 << 8)
 
-    def test_tail_table_is_reserved_for_the_shortest_entries(self) -> None:
-        self.assertLessEqual(max(map(len, TAIL_TABLE)), len(PAIR_TABLE[0]))
-        self.assertLessEqual(max(map(len, GEMMA4_TAIL_TABLE)), len(GEMMA4_PAIR_TABLE[0]))
+    def test_tail_table_starts_with_preferred_ascii_sequence(self) -> None:
+        preferred = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+        expected = tuple(preferred)
+        self.assertEqual(TAIL_TABLE[: len(expected)], expected)
+        self.assertEqual(GEMMA4_TAIL_TABLE[: len(expected)], expected)
 
     def test_supported_vocabs_lists_public_options(self) -> None:
         self.assertEqual(supported_vocabs(), ("o200k", "gemma4"))
@@ -250,8 +252,29 @@ class IdTokenBiMapTests(unittest.TestCase):
 
     def test_remaps_known_collision(self) -> None:
         codec = IdTokenBiMap()
-        pair_value = bytes.fromhex("1f08")
-        colliding_triplet = bytes.fromhex("000127")
+        pair_index_by_token = {token: index for index, token in enumerate(PAIR_TABLE)}
+
+        pair_value: bytes | None = None
+        colliding_triplet: bytes | None = None
+        for pair_index, pair_token in enumerate(PAIR_TABLE):
+            for tail_index, tail_token in enumerate(TAIL_TABLE):
+                colliding_token = pair_token + tail_token
+                other_pair_index = pair_index_by_token.get(colliding_token)
+                if other_pair_index is None or other_pair_index == pair_index:
+                    continue
+                pair_value = other_pair_index.to_bytes(2, byteorder="big", signed=False)
+                colliding_triplet = (
+                    pair_index.to_bytes(2, byteorder="big", signed=False)
+                    + bytes([tail_index])
+                )
+                break
+            if pair_value is not None:
+                break
+
+        self.assertIsNotNone(pair_value)
+        self.assertIsNotNone(colliding_triplet)
+        assert pair_value is not None
+        assert colliding_triplet is not None
 
         stage1_pair = frombytes(pair_value)
         stage1_triplet = frombytes(colliding_triplet)

@@ -181,9 +181,18 @@ def select_subset(
     pair_table_size: int,
     tail_table_size: int,
 ) -> tuple[list[TokenEntry], list[TokenEntry]]:
-    ordered_candidates = sorted(
-        candidates, key=lambda entry: (len(entry.token_text), entry.rank)
-    )
+    preferred_single_chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+    preferred_index = {character: index for index, character in enumerate(preferred_single_chars)}
+
+    def selection_key(entry: TokenEntry) -> tuple[int, int]:
+        preferred = (
+            len(entry.token_text) == 1 and entry.token_text in preferred_index
+        )
+        if preferred:
+            return (0, preferred_index[entry.token_text])
+        return (1, entry.rank)
+
+    ordered_candidates = sorted(candidates, key=selection_key)
     tail_entries = ordered_candidates[:tail_table_size]
     pair_entries = ordered_candidates[tail_table_size : tail_table_size + pair_table_size]
     return pair_entries, tail_entries
@@ -244,8 +253,10 @@ def write_lookup_table(
             "Zero-based line number equals the unsigned 8-bit value decoded from "
             "the odd trailing source byte."
         ),
-        "selection_order": "sorted by (len(token_text), rank)",
-        "tail_selection_rule": "first tail_table_size entries from the selection order",
+        "selection_order": (
+            "single-char [0-9A-Za-z] first in fixed ASCII sequence, then rank order"
+        ),
+        "tail_selection_rule": "first tail_table_size entries from selection_order",
         "pair_selection_rule": (
             "entries immediately after the reserved tail slice, continuing for "
             "pair_table_size entries"
@@ -334,7 +345,7 @@ def print_summary(
 
     print(
         "Example 2-byte mappings using the provisional subset "
-        "(after reserving the shortest eligible tail tokens first):"
+        "(after reserving the first tail slice from selection order):"
     )
     for index in indices:
         print(f"  - {format_example_mapping(index, pair_entries[index])}")

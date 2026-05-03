@@ -16,13 +16,14 @@ select_subset = MODULE_GLOBALS["select_subset"]
 
 
 class ProcessTokenVocabTests(unittest.TestCase):
-    def test_select_subset_reserves_shortest_entries_for_tail_table(self) -> None:
+    def test_select_subset_prioritizes_alnum_ascii_then_rank(self) -> None:
         candidates = [
-            TokenEntry(rank=30, token_bytes=b"bb", token_text="bb"),
-            TokenEntry(rank=10, token_bytes=b"a", token_text="a"),
-            TokenEntry(rank=20, token_bytes=b"c", token_text="c"),
-            TokenEntry(rank=5, token_bytes=b"dd", token_text="dd"),
-            TokenEntry(rank=40, token_bytes=b"eee", token_text="eee"),
+            TokenEntry(rank=1, token_bytes=b"zz", token_text="zz"),
+            TokenEntry(rank=2, token_bytes=b"a", token_text="a"),
+            TokenEntry(rank=3, token_bytes=b"0", token_text="0"),
+            TokenEntry(rank=4, token_bytes=b"A", token_text="A"),
+            TokenEntry(rank=5, token_bytes=b"B", token_text="B"),
+            TokenEntry(rank=6, token_bytes=b"_", token_text="_"),
         ]
 
         pair_entries, tail_entries = select_subset(
@@ -31,8 +32,25 @@ class ProcessTokenVocabTests(unittest.TestCase):
             tail_table_size=2,
         )
 
-        self.assertEqual([entry.token_text for entry in tail_entries], ["a", "c"])
-        self.assertEqual([entry.token_text for entry in pair_entries], ["dd", "bb"])
+        self.assertEqual([entry.token_text for entry in tail_entries], ["0", "A"])
+        self.assertEqual([entry.token_text for entry in pair_entries], ["B", "a"])
+
+    def test_select_subset_keeps_non_preferred_tokens_in_rank_order(self) -> None:
+        candidates = [
+            TokenEntry(rank=10, token_bytes=b"__", token_text="__"),
+            TokenEntry(rank=20, token_bytes=b"_", token_text="_"),
+            TokenEntry(rank=30, token_bytes=b"abc", token_text="abc"),
+            TokenEntry(rank=40, token_bytes="é".encode("utf-8"), token_text="é"),
+        ]
+
+        pair_entries, tail_entries = select_subset(
+            candidates,
+            pair_table_size=2,
+            tail_table_size=2,
+        )
+
+        self.assertEqual([entry.token_text for entry in tail_entries], ["__", "_"])
+        self.assertEqual([entry.token_text for entry in pair_entries], ["abc", "é"])
 
     def test_load_vocab_entries_reads_sentencepiece_model(self) -> None:
         class FakeSentencePieceProcessor:

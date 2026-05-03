@@ -1,3 +1,8 @@
+---
+description: 
+alwaysApply: true
+---
+
 # UTF-Token utility
 
 This repo consists of a library (planned for Python and Typescript) that converts random bytes to a compact LLM-friendly string representation. The goals is to reduce token usage for LLM calls that require the model to read/write large amounts of common random strings, such as hashes, UUIDs and other identifiers.
@@ -32,13 +37,11 @@ This repo consists of a library (planned for Python and Typescript) that convert
 
 ## Decoding tables
 
-For now, we work only with the o200k OpenAI token vocabulary. We take a subset of size 2^16 and build a lookup table for each 2-byte combination. So, for every 2 bytes in the incoming sequence, we have 1 o200k token.
+For now, we work with the o200k OpenAI and Gemma4 token vocabs. We take a subset of size 2^16 + 2^8	and build 2 lookup tables for each vocab. So, for every 2 bytes in the incoming sequence, we fetch 1 token from the large table, and use the short table for 1-byte odd trailing bytes.
 
-The 2^16 subset is alnum + '_' char, excluding the longest tokens to match the specified set size. The logic is to avoid special characters in JSON and Markdown, which are typical LLM I/O formats. Also, we want the LLM to clearly distinguish the resulting random string sequences from the surrounding context, so special characters used commonly to delimit table columns, sequences and strings are excluded.
+The token subset is alnum + '_' char, excluding the last tokens in the filter to match the specified set size. The logic is to avoid special characters in JSON and Markdown, which are typical LLM I/O formats. Also, we want the LLM to clearly distinguish the resulting random string sequences from the surrounding context, so special characters used commonly to delimit table columns, sequences and strings are excluded.
 
-The current default lookup table is `data/lookup_tables/o200k_base_65536_tokens.txt`. It has 1 row per token in a single column. For a lookup, each 2-byte pair should be converted to an unsigned 16-bit integer, and use that to index the table.
-
-If an input byte sequence ends in a single byte, a 'tail' table is used, which consists of only 2^8 tokens (distinct from the larger table).
+The current default lookup table is `data/lookup_tables/o200k_base_65536_tokens.txt`. It has 1 row per token in a single column. For a lookup, each 2-byte pair should be converted to an unsigned 16-bit integer, and use that to index the table. For a single-byte odd trailing byte, the unsigned 8-bit value of the byte should be used to index the tail table `data/lookup_tables/o200k_base_65536_tail_256_tokens.txt`. The Gemma tables have similar names.
 
 ## Standalone functions vs IdTokenBiMap class
 
@@ -58,7 +61,7 @@ But the standalone functions are forward-only. From the resulting string of conc
 
 ## Roadmap
 
-1. Python library. Currently implementing arguments and options.
+1. Python library. Currently implementing features, benchmarks and docs.
 2. Typescript npm package. This will begin once the Python library is done.
 
 ### Release status

@@ -10,7 +10,7 @@ Average reduction (can be further reduced with additional parameters, see below)
 | base64 | 47% |
 | uuid | 62% |
 
-The conversion is fully reversible, provided it was originally done with the correct API and stored.
+The conversion is fully reversible (see below).
 
 ## Python API
 
@@ -63,7 +63,7 @@ All forward methods also accept `truncate_bytes=<positive int>` to encode only t
 token = bimap.frombytes(b"\x01\x02\x03\x04\x05\x06", truncate_bytes=4)
 ```
 
-Reverse lookups still return the full original bytes you encoded, so you can reduce prompt footprint without losing round-trip reversibility.
+Reverse lookups still return the full original bytes pre-truncation, so you can reduce token usage without losing round-trip reversibility.
 
 ### Persisting the reversible map
 
@@ -97,9 +97,7 @@ This makes the output easier to embed in JSON, Markdown, logs, tables, and promp
 
 To avoid confusion when your agent sees these IDs, you can include these instructions:
 
-```text
-Identifiers are encoded as compact LLM-friendly strings. They contain only alphanumeric characters from any alphabet plus underscores. Any other special character next to the identifier, such as quotes, slashes, brackets, commas, pipes, whitespace, or other delimiters, marks where the identifier starts or ends. Copy them exactly as written when filling tool arguments or table fields. Do not decode, normalize, translate, split, or reformat them. Some identifiers may resemble real text, it's just a coincidence due to the use of tokens.
-```
+> Identifiers are encoded as compact LLM-friendly strings. They contain only alphanumeric characters from any alphabet plus underscores. Any other special character next to the identifier, such as quotes, slashes, brackets, commas, pipes, whitespace, or other delimiters, marks where the identifier starts or ends. Copy them exactly as written when filling tool arguments or table fields. Do not decode, normalize, translate, split, or reformat them. Some identifiers may resemble real text, it's just a coincidence due to the use of tokens.
 
 ## How it works
 

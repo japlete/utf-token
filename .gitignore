@@ -5,9 +5,11 @@ build/
 dist/
 wheels/
 *.egg-info
+.ruff_cache/
 
 # Virtual environments
 .venv
+.venv-*
 
 # Downloaded vocabs
 data/token_vocab/
@@ -17,3 +19,6 @@ data/token_vocab/
 
 # Local notebook outputs
 docs/assets/notebooks
+
+# Claude repo instructions (if you use Claude simply create a local symlink to AGENTS.md named CLAUDE.md)
+CLAUDE.md

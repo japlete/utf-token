@@ -8,12 +8,12 @@ from setuptools.command.build_py import build_py as _build_py
 
 
 PACKAGE_DATA_FILENAMES = (
-    "o200k_base_65536_metadata.json",
-    "o200k_base_65536_tail_256_tokens.txt",
-    "o200k_base_65536_tokens.txt",
-    "tokenizer_gemma4_65536_metadata.json",
-    "tokenizer_gemma4_65536_tail_256_tokens.txt",
-    "tokenizer_gemma4_65536_tokens.txt",
+    "o200k_base_32768_metadata.json",
+    "o200k_base_32768_tail_256_tokens.txt",
+    "o200k_base_32768_tokens.txt",
+    "tokenizer_gemma4_32768_metadata.json",
+    "tokenizer_gemma4_32768_tail_256_tokens.txt",
+    "tokenizer_gemma4_32768_tokens.txt",
 )
 
 

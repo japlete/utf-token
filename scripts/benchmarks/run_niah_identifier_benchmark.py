@@ -16,6 +16,7 @@ import tiktoken
 from scripts.benchmarks.niah_dataset import (
     ENCODINGS,
     BenchmarkConfig,
+    EncodingName,
     EncodingCondition,
     NiahSample,
     VocabName,
@@ -35,25 +36,56 @@ DEFAULT_OUTPUT_DIR = Path("docs/assets/benchmarks")
 DEFAULT_RUNS_PATH = DEFAULT_OUTPUT_DIR / "niah_identifier_runs.jsonl"
 DEFAULT_SUMMARY_CSV_PATH = DEFAULT_OUTPUT_DIR / "niah_identifier_summary.csv"
 DEFAULT_SUMMARY_MD_PATH = DEFAULT_OUTPUT_DIR / "niah_identifier_summary.md"
-DEFAULT_SAMPLES_PER_CELL = 20
+DEFAULT_PROMPT_EXAMPLE_PATH = DEFAULT_OUTPUT_DIR / "niah_identifier_prompt_example.txt"
+DEFAULT_SAMPLES_PER_CELL = 100
 DEFAULT_CONTEXT_LENGTH_TARGET = 32_000
 DEFAULT_DEPTH_PERCENT = 50.0
-DEFAULT_BASE_SEED = 7
+DEFAULT_BASE_SEED = 41
 DEFAULT_MAX_OUTPUT_TOKENS = 64
-RUN_ID = "niah_identifier_single_scenario_v4_fixed_rows"
-IDENTIFIER_RESPONSE_FORMAT: dict[str, object] = {
-    "type": "json_schema",
-    "json_schema": {
-        "name": "identifier_answer",
-        "strict": True,
-        "schema": {
-            "type": "object",
-            "properties": {"identifier": {"type": "string"}},
-            "required": ["identifier"],
-            "additionalProperties": False,
-        },
-    },
+DEFAULT_ENCODINGS: tuple[EncodingName, ...] = ("utf_token", "utf_token_truncate_3")
+GEMINI_PRO_MIN_REASONING_TOKENS = 128
+RUN_ID = "niah_15bit_3models_utfencodings_healing_100samples"
+IDENTIFIER_PATTERNS: dict[EncodingName, str] = {
+    "raw_hex": "^[0-9a-fA-F]+$",
+    "raw_base64": "^[A-Za-z0-9+/]+={0,2}$",
+    "raw_uuid": (
+        "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+        "[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    ),
+    "utf_token": "^[A-Za-z0-9_]+$",
+    "utf_token_truncate_3": "^[A-Za-z0-9_]+$",
 }
+
+IDENTIFIER_MAX_LENGTHS: dict[EncodingName, int] = {
+    "raw_hex": 32,
+    "raw_base64": 24,
+    "raw_uuid": 36,
+    "utf_token": 90,
+    "utf_token_truncate_3": 90,
+}
+
+
+def identifier_response_format(encoding: EncodingName) -> dict[str, object]:
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "id_answer",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "pattern": IDENTIFIER_PATTERNS[encoding],
+                        "minLength": 1,
+                        "maxLength": IDENTIFIER_MAX_LENGTHS[encoding],
+                    },
+                },
+                "required": ["id"],
+                "additionalProperties": False,
+            },
+        },
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +121,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--summary-csv", type=Path, default=DEFAULT_SUMMARY_CSV_PATH)
     parser.add_argument("--summary-md", type=Path, default=DEFAULT_SUMMARY_MD_PATH)
     parser.add_argument(
+        "--all-encodings",
+        action="store_true",
+        help="Run all identifier encodings. If omitted, only utf-token encodings are run.",
+    )
+    parser.add_argument(
         "--resume",
         action="store_true",
         help="Skip rows already present in the JSONL output by model/encoding/sample/hash.",
@@ -97,6 +134,22 @@ def parse_args() -> argparse.Namespace:
         "--dry-run",
         action="store_true",
         help="Generate prompts and print metadata without calling OpenRouter.",
+    )
+    parser.add_argument(
+        "--write-prompt-example",
+        type=Path,
+        nargs="?",
+        const=DEFAULT_PROMPT_EXAMPLE_PATH,
+        help=(
+            "Write one full generated prompt to the given path, or to the default "
+            "docs asset path if no path is supplied, then exit."
+        ),
+    )
+    parser.add_argument(
+        "--prompt-example-encoding",
+        choices=ENCODINGS,
+        default="utf_token",
+        help="Identifier encoding to use with --write-prompt-example.",
     )
     return parser.parse_args()
 
@@ -121,6 +174,17 @@ def main() -> None:
         f"{config.context_length_target} tokens at {chars_per_token:.3f} chars/token; "
         f"fixed record_count={record_count}."
     )
+    if args.write_prompt_example is not None:
+        _write_prompt_example(
+            path=args.write_prompt_example,
+            config=config,
+            encoding=args.prompt_example_encoding,
+            context_character_target=context_character_target,
+            record_count=record_count,
+        )
+        return
+
+    target_encodings = ENCODINGS if args.all_encodings else DEFAULT_ENCODINGS
 
     all_rows = _load_rows(args.output_jsonl) if args.output_jsonl.exists() else []
     rows = _compatible_rows(all_rows, config, context_character_target, record_count)
@@ -137,7 +201,7 @@ def main() -> None:
     try:
         with args.output_jsonl.open("a", encoding="utf-8") as output_file:
             for model in MODEL_SPECS:
-                for encoding in ENCODINGS:
+                for encoding in target_encodings:
                     condition = EncodingCondition(encoding=encoding, vocab=model.vocab)
                     for sample_index in range(1, config.samples_per_cell + 1):
                         work_key = _work_key(model.slug, encoding, sample_index)
@@ -194,9 +258,10 @@ def _run_one_call(
     completion = client.complete(
         model_slug=model.slug,
         prompt=sample.prompt,
-        max_tokens=max_output_tokens,
+        max_tokens=_max_tokens_for_model(model.slug, max_output_tokens),
         temperature=0.0,
-        response_format=IDENTIFIER_RESPONSE_FORMAT,
+        response_format=identifier_response_format(sample.encoding),
+        reasoning=_reasoning_config_for_model(model.slug),
     )
     latency_ms = round((time.perf_counter() - started) * 1000)
     return _build_row(
@@ -241,6 +306,22 @@ def _build_row(
         "usage": completion.usage,
         "error": error,
     }
+
+
+def _max_tokens_for_model(model_slug: str, answer_token_budget: int) -> int:
+    if _is_google_gemini_pro(model_slug):
+        return answer_token_budget + GEMINI_PRO_MIN_REASONING_TOKENS
+    return answer_token_budget
+
+
+def _reasoning_config_for_model(model_slug: str) -> dict[str, object]:
+    if _is_google_gemini_pro(model_slug):
+        return {"max_tokens": GEMINI_PRO_MIN_REASONING_TOKENS, "exclude": True}
+    return {"enabled": False}
+
+
+def _is_google_gemini_pro(model_slug: str) -> bool:
+    return model_slug.startswith("google/gemini-") and "-pro" in model_slug
 
 
 def _load_rows(path: Path) -> list[dict[str, object]]:
@@ -331,6 +412,30 @@ def _write_summary_csv(path: Path, rows: list[dict[str, object]]) -> None:
 def _write_summary_md(path: Path, rows: list[dict[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_format_markdown_table(rows) + "\n", encoding="utf-8")
+
+
+def _write_prompt_example(
+    *,
+    path: Path,
+    config: BenchmarkConfig,
+    encoding: EncodingName,
+    context_character_target: int,
+    record_count: int,
+) -> None:
+    condition = EncodingCondition(encoding=encoding, vocab=MODEL_SPECS[0].vocab)
+    sample = generate_sample(
+        config=config,
+        condition=condition,
+        sample_index=1,
+        record_count=record_count,
+        context_character_target=context_character_target,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(sample.prompt + "\n", encoding="utf-8")
+    print(
+        f"Wrote {path} with encoding={sample.encoding}, "
+        f"vocab={sample.vocab}, prompt_hash={sample.prompt_hash}."
+    )
 
 
 def _format_markdown_table(rows: list[dict[str, object]]) -> str:

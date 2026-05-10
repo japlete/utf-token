@@ -31,17 +31,32 @@ This repo consists of a library (planned for Python and Typescript) that convert
 ## Repo structure
 
 - `scripts/`: for offline work, such as building our special decoding tables.
-- `src/utf-token-py/`: Python library code. Empty for now.
+- `src/utf_token/`: Python library code (importable as `utf_token`).
+- `src/utf_token/data/`: lookup tables and metadata that ship with the package.
+- `tests/`: unit tests for the library and offline scripts.
 - `data/token_vocab/`: (gitignored) downloaded token vocabs to process in further scripts.
-- `data/lookup_tables`: processed token vocabs ready to be used as lookup tables.
+- `data/lookup_tables/`: processed token vocabs ready to be used as lookup tables (mirrored into `src/utf_token/data/` for packaging).
 
 ## Decoding tables
 
-For now, we work with the o200k OpenAI and Gemma4 token vocabs. We take a subset of size 2^16 + 2^8	and build 2 lookup tables for each vocab. So, for every 2 bytes in the incoming sequence, we fetch 1 token from the large table, and use the short table for 1-byte odd trailing bytes.
+We work with the o200k OpenAI and Gemma4 token vocabs. For each vocab, [`scripts/process_token_vocab.py`](scripts/process_token_vocab.py) tries an ordered list of cleanup recipes and picks the first one that supplies enough tokens for both a pair table and a 256-entry tail table:
 
-The token subset is alnum + '_' char, excluding the last tokens in the filter to match the specified set size. The logic is to avoid special characters in JSON and Markdown, which are typical LLM I/O formats. Also, we want the LLM to clearly distinguish the resulting random string sequences from the surrounding context, so special characters used commonly to delimit table columns, sequences and strings are excluded.
+1. `latin_16bit`: UTF-8 printable, alphanumeric or `_`, at most 10 characters long, plus precomposed letters from the Latin-1 Supplement (`U+00C0`-`U+00FF`) and Latin Extended-A (`U+0100`-`U+017F`) blocks. Targets `2^16 + 2^8` tokens (16-bit pair index).
+2. `ascii_15bit`: ASCII alphanumeric or `_` only, at most 10 characters long. Targets `2^15 + 2^8` tokens (15-bit pair index). Used as a fallback when a vocab does not have enough clean tokens for the 16-bit recipe.
 
-The current default lookup table is `data/lookup_tables/o200k_base_65536_tokens.txt`. It has 1 row per token in a single column. For a lookup, each 2-byte pair should be converted to an unsigned 16-bit integer, and use that to index the table. For a single-byte odd trailing byte, the unsigned 8-bit value of the byte should be used to index the tail table `data/lookup_tables/o200k_base_65536_tail_256_tokens.txt`. The Gemma tables have similar names.
+Currently both `o200k` and `gemma4` land on `ascii_15bit`. The character and length policies are deliberate trade-offs: NIAH-style benchmarks showed that smaller LLMs mistranscribed identifiers that mixed unfamiliar scripts (Devanagari, Arabic, Cuneiform, Fullwidth or Mathematical Latin, etc.) or long, low-probability token fragments. The curated `latin_16bit` policy intentionally excludes those scripts, and the gemma4 vocab does not contain enough qualifying tokens to fill a 16-bit pair table, so it falls back to ASCII-only just like `o200k`. We sacrifice a small amount of efficiency for better visual reliability.
+
+Each generated table is paired with a JSON metadata file that records the recipe, `pair_table_size`, `pair_index_bits`, `tail_table_size`, `tail_index_bits`, allowed character policy, maximum token length (`max_token_length`), and the inclusive non-ASCII Unicode codepoint ranges (`allowed_non_ascii_ranges`). Filenames are sized after the actual pair-table size so mixed sizes can coexist:
+
+- `data/lookup_tables/o200k_base_32768_tokens.txt`, `o200k_base_32768_tail_256_tokens.txt`, `o200k_base_32768_metadata.json`.
+- `data/lookup_tables/tokenizer_gemma4_32768_tokens.txt`, `tokenizer_gemma4_32768_tail_256_tokens.txt`, `tokenizer_gemma4_32768_metadata.json`.
+
+Each table file has 1 row per token in a single column. The runtime (in [`src/utf_token/_tables.py`](src/utf_token/_tables.py) and [`src/utf_token/_api.py`](src/utf_token/_api.py)) reads `pair_index_bits` from metadata and dispatches to the appropriate path:
+
+- For `pair_index_bits == 16`, each consecutive 2-byte chunk indexes the pair table and an odd trailing byte indexes the 256-entry tail table. (No shipped vocab currently uses this fast path; it is reserved for any future vocab that supplies enough qualifying tokens for the `latin_16bit` recipe.)
+- For `pair_index_bits < 16` (e.g. `o200k` and `gemma4` at 15 bits), the input is consumed as an MSB-first bitstream in `pair_index_bits` chunks. A 1–8 bit residual indexes the tail table; a 9 to `pair_index_bits - 1` bit residual indexes the pair table (left-padded with zeros).
+
+When changing recipes or filenames, also update [`src/utf_token/_tables.py`](src/utf_token/_tables.py) (`VOCAB_FILENAMES`), [`setup.py`](setup.py) (`PACKAGE_DATA_FILENAMES`), and [`scripts/smoke_installed_package.py`](scripts/smoke_installed_package.py) so the wheel ships the right data.
 
 ## Standalone functions vs IdTokenBiMap class
 

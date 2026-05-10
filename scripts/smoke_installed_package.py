@@ -9,12 +9,12 @@ from utf_token import frombase64, frombytes, fromhex, fromuuid
 
 
 EXPECTED_DATA_FILES = {
-    "o200k_base_65536_metadata.json",
-    "o200k_base_65536_tail_256_tokens.txt",
-    "o200k_base_65536_tokens.txt",
-    "tokenizer_gemma4_65536_metadata.json",
-    "tokenizer_gemma4_65536_tail_256_tokens.txt",
-    "tokenizer_gemma4_65536_tokens.txt",
+    "o200k_base_32768_metadata.json",
+    "o200k_base_32768_tail_256_tokens.txt",
+    "o200k_base_32768_tokens.txt",
+    "tokenizer_gemma4_32768_metadata.json",
+    "tokenizer_gemma4_32768_tail_256_tokens.txt",
+    "tokenizer_gemma4_32768_tokens.txt",
 }
 PROJECT_SRC_DIR = Path(__file__).resolve().parents[1] / "src" / "utf_token"
 

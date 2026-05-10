@@ -1,0 +1,22 @@
+{
+  "source_vocab": "data/token_vocab/o200k_base.tiktoken",
+  "recipe_name": "ascii_15bit",
+  "recipe_description": "15-bit pair table; ASCII alnum or underscore only, for vocabs that cannot supply enough clean tokens for a 16-bit table.",
+  "allowed_character_policy": "ASCII alphanumeric or underscore",
+  "allowed_non_ascii_ranges": [],
+  "max_token_length": 10,
+  "pair_table_size": 32768,
+  "pair_entry_count": 32768,
+  "pair_index_bits": 15,
+  "pair_index_byte_order": "big",
+  "pair_lookup_rule": "Zero-based line number equals the unsigned 15-bit value extracted from the input bitstream, MSB-first, in order. The final residual of 16..29 bits also indexes this table; residuals of 1..8 bits index the tail table instead.",
+  "tail_table_size": 256,
+  "tail_entry_count": 256,
+  "tail_index_bits": 8,
+  "tail_lookup_rule": "Zero-based line number equals the unsigned 8-bit value decoded from the trailing residual bits of the input bitstream (left-padded with zero bits when fewer than 8).",
+  "selection_order": "single-char [0-9A-Za-z] first in fixed ASCII sequence, then rank order",
+  "tail_selection_rule": "first tail_table_size entries from selection_order",
+  "pair_selection_rule": "entries immediately after the reserved tail slice, continuing for pair_table_size entries",
+  "pair_tokens_file": "o200k_base_32768_tokens.txt",
+  "tail_tokens_file": "o200k_base_32768_tail_256_tokens.txt"
+}

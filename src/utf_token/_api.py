@@ -6,7 +6,7 @@ from collections.abc import Iterable, Iterator
 from typing import TypeAlias, overload
 from uuid import UUID
 
-from ._tables import DEFAULT_VOCAB, VocabName, pair_table, tail_table
+from ._tables import DEFAULT_VOCAB, TableSpec, VocabName, pair_table, table_spec, tail_table
 
 Base64Value: TypeAlias = str | bytes
 UUIDValue: TypeAlias = UUID | str
@@ -29,15 +29,14 @@ def _truncate_input(data: bytes, *, truncate_bytes: int | None) -> bytes:
     return data[:limit]
 
 
-def _encode_bytes_single(
+def _encode_byte_aligned(
     data: bytes,
     *,
-    vocab: VocabName = DEFAULT_VOCAB,
-    truncate_bytes: int | None = None,
+    pair_tokens: tuple[str, ...],
+    trailing_tokens: tuple[str, ...],
 ) -> str:
-    data = _truncate_input(data, truncate_bytes=truncate_bytes)
-    pair_tokens = pair_table(vocab)
-    trailing_tokens = tail_table(vocab)
+    """Fast path used when `pair_index_bits == 16`: byte-aligned chunking."""
+
     encoded_parts: list[str] = []
     pair_limit = len(data) - (len(data) % 2)
 
@@ -49,6 +48,75 @@ def _encode_bytes_single(
         encoded_parts.append(trailing_tokens[data[-1]])
 
     return "".join(encoded_parts)
+
+
+def _encode_bitstream(
+    data: bytes,
+    *,
+    pair_tokens: tuple[str, ...],
+    trailing_tokens: tuple[str, ...],
+    spec: TableSpec,
+) -> str:
+    """Generic path that consumes the input as an MSB-first bitstream.
+
+    The stream is split into `pair_index_bits` chunks. Trailing residuals of
+    `1..tail_index_bits` bits index the tail table; residuals of
+    `tail_index_bits + 1 .. pair_index_bits - 1` bits index the pair table
+    (left-padded with zeros so the value fits the pair-table address space).
+    """
+
+    total_bits = 8 * len(data)
+    pair_index_bits = spec.pair_index_bits
+    tail_index_bits = spec.tail_index_bits
+    full_chunks, residual_bits = divmod(total_bits, pair_index_bits)
+    value = int.from_bytes(data, byteorder="big", signed=False)
+
+    encoded_parts: list[str] = []
+    pair_mask = (1 << pair_index_bits) - 1
+    for chunk_index in range(full_chunks):
+        shift = (full_chunks - 1 - chunk_index) * pair_index_bits + residual_bits
+        index = (value >> shift) & pair_mask
+        encoded_parts.append(pair_tokens[index])
+
+    if residual_bits == 0:
+        return "".join(encoded_parts)
+
+    residual_value = value & ((1 << residual_bits) - 1)
+    if residual_bits <= tail_index_bits:
+        encoded_parts.append(trailing_tokens[residual_value])
+    else:
+        encoded_parts.append(pair_tokens[residual_value])
+
+    return "".join(encoded_parts)
+
+
+def _encode_bytes_single(
+    data: bytes,
+    *,
+    vocab: VocabName = DEFAULT_VOCAB,
+    truncate_bytes: int | None = None,
+) -> str:
+    data = _truncate_input(data, truncate_bytes=truncate_bytes)
+    if not data:
+        return ""
+
+    pair_tokens = pair_table(vocab)
+    trailing_tokens = tail_table(vocab)
+    spec = table_spec(vocab)
+
+    if spec.pair_index_bits == 16 and spec.tail_index_bits == 8:
+        return _encode_byte_aligned(
+            data,
+            pair_tokens=pair_tokens,
+            trailing_tokens=trailing_tokens,
+        )
+
+    return _encode_bitstream(
+        data,
+        pair_tokens=pair_tokens,
+        trailing_tokens=trailing_tokens,
+        spec=spec,
+    )
 
 
 def _decode_hex_bytes(data: str) -> bytes:

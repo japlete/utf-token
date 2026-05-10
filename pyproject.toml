@@ -18,7 +18,9 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Typing :: Typed",
 ]
-dependencies = []
+dependencies = [
+    "levenshtein>=0.27.3",
+]
 
 [dependency-groups]
 dev = [

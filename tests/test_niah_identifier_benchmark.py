@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import unittest
+from typing import cast
 from uuid import UUID
 
 import httpx
@@ -10,6 +12,8 @@ import httpx
 from scripts.benchmarks.niah_dataset import (
     BenchmarkConfig,
     EncodingCondition,
+    EncodingName,
+    VocabName,
     estimate_hex_baseline_record_count,
     generate_sample,
     make_payload,
@@ -19,9 +23,13 @@ from scripts.benchmarks.niah_dataset import (
 )
 from scripts.benchmarks.openrouter_client import OpenRouterClient, OpenRouterConfig
 from scripts.benchmarks.run_niah_identifier_benchmark import (
-    IDENTIFIER_RESPONSE_FORMAT,
+    IDENTIFIER_MAX_LENGTHS,
+    IDENTIFIER_PATTERNS,
     RUN_ID,
     _load_completed_keys,
+    _max_tokens_for_model,
+    _reasoning_config_for_model,
+    identifier_response_format,
 )
 from utf_token import IdTokenBiMap
 
@@ -95,11 +103,18 @@ class NiahIdentifierBenchmarkTests(unittest.TestCase):
             EncodingCondition(encoding="utf_token", vocab="gemma4"),
             codec,
         )
+        truncated_utf_token_text = render_identifier(
+            payload,
+            EncodingCondition(encoding="utf_token_truncate_3", vocab="gemma4"),
+            codec,
+        )
 
         self.assertEqual(bytes.fromhex(hex_text), payload)
         self.assertEqual(base64.b64decode(base64_text, validate=True), payload)
         self.assertEqual(UUID(uuid_text).bytes, payload)
         self.assertEqual(codec.tobytes(utf_token_text), payload)
+        self.assertEqual(codec.tobytes(truncated_utf_token_text), payload)
+        self.assertNotEqual(truncated_utf_token_text, utf_token_text)
 
     def test_fixed_record_count_keeps_same_number_of_rows(self) -> None:
         config = BenchmarkConfig(context_length_target=100)
@@ -123,6 +138,21 @@ class NiahIdentifierBenchmarkTests(unittest.TestCase):
         self.assertEqual(len(context_lines(hex_sample.prompt)), record_count)
         self.assertEqual(len(context_lines(utf_token_sample.prompt)), record_count)
 
+    def test_truncated_utf_token_scores_by_reversible_mapping(self) -> None:
+        sample = generate_sample(
+            BenchmarkConfig(context_length_target=50),
+            EncodingCondition(encoding="utf_token_truncate_3", vocab="o200k"),
+            sample_index=1,
+            record_count=10,
+            context_character_target=500,
+        )
+
+        score = score_response(sample, json.dumps({"id": sample.needle_value_text}))
+
+        self.assertTrue(score.exact_match)
+        self.assertTrue(score.normalized_match)
+        self.assertTrue(score.format_valid)
+
     def test_render_identifier_rejects_uuid_for_non_16_byte_payload(self) -> None:
         with self.assertRaisesRegex(ValueError, "UUID identifiers require 16-byte payloads"):
             render_identifier(
@@ -140,7 +170,7 @@ class NiahIdentifierBenchmarkTests(unittest.TestCase):
             context_character_target=500,
         )
 
-        score = score_response(sample, json.dumps({"identifier": sample.needle_value_text}))
+        score = score_response(sample, json.dumps({"id": sample.needle_value_text}))
 
         self.assertTrue(score.exact_match)
         self.assertTrue(score.normalized_match)
@@ -157,7 +187,7 @@ class NiahIdentifierBenchmarkTests(unittest.TestCase):
 
         score = score_response(
             sample,
-            json.dumps({"identifier": f"`{sample.needle_value_text.upper()}`"}),
+            json.dumps({"id": f"`{sample.needle_value_text.upper()}`"}),
         )
 
         self.assertFalse(score.exact_match)
@@ -173,11 +203,95 @@ class NiahIdentifierBenchmarkTests(unittest.TestCase):
             context_character_target=500,
         )
 
-        score = score_response(sample, json.dumps({"identifier": sample.needle_value_text}))
+        score = score_response(sample, json.dumps({"id": sample.needle_value_text}))
 
         self.assertTrue(score.exact_match)
         self.assertTrue(score.normalized_match)
         self.assertTrue(score.format_valid)
+
+    def test_score_response_heals_utf_token_substitution(self) -> None:
+        sample = generate_sample(
+            BenchmarkConfig(context_length_target=50),
+            EncodingCondition(encoding="utf_token", vocab="gemma4"),
+            sample_index=1,
+            record_count=10,
+            context_character_target=500,
+        )
+        target = sample.needle_value_text
+        garbled = target[:-1] + ("Z" if target[-1] != "Z" else "Y")
+
+        score = score_response(sample, json.dumps({"id": garbled}))
+
+        self.assertFalse(score.exact_match)
+        self.assertTrue(score.normalized_match)
+        self.assertFalse(score.format_valid)
+
+    def test_score_response_heals_utf_token_non_ascii_insertion(self) -> None:
+        sample = generate_sample(
+            BenchmarkConfig(context_length_target=50),
+            EncodingCondition(encoding="utf_token", vocab="gemma4"),
+            sample_index=1,
+            record_count=10,
+            context_character_target=500,
+        )
+        target = sample.needle_value_text
+        midpoint = max(1, len(target) // 2)
+        garbled = target[:midpoint] + "\u4e2d" + target[midpoint:]
+
+        score = score_response(sample, json.dumps({"id": garbled}))
+
+        self.assertFalse(score.exact_match)
+        self.assertTrue(score.normalized_match)
+        self.assertFalse(score.format_valid)
+
+    def test_identifier_response_format_pattern_matches_real_outputs(self) -> None:
+        config = BenchmarkConfig(context_length_target=50)
+        cases: list[tuple[EncodingName, VocabName]] = [
+            ("raw_hex", "o200k"),
+            ("raw_base64", "o200k"),
+            ("raw_uuid", "o200k"),
+            ("utf_token", "gemma4"),
+            ("utf_token_truncate_3", "gemma4"),
+        ]
+        for encoding, vocab in cases:
+            with self.subTest(encoding=encoding):
+                sample = generate_sample(
+                    config,
+                    EncodingCondition(encoding=encoding, vocab=vocab),
+                    sample_index=1,
+                    record_count=10,
+                    context_character_target=500,
+                )
+                compiled = re.compile(IDENTIFIER_PATTERNS[encoding])
+                self.assertRegex(sample.needle_value_text, compiled)
+                self.assertLessEqual(
+                    len(sample.needle_value_text),
+                    IDENTIFIER_MAX_LENGTHS[encoding],
+                )
+
+    def test_identifier_response_format_pattern_is_encoding_specific(self) -> None:
+        uuid_pattern = re.compile(IDENTIFIER_PATTERNS["raw_uuid"])
+        utf_pattern = re.compile(IDENTIFIER_PATTERNS["utf_token"])
+        base64_pattern = re.compile(IDENTIFIER_PATTERNS["raw_base64"])
+
+        sample_uuid = "123e4567-e89b-12d3-a456-426614174000"
+        self.assertRegex(sample_uuid, uuid_pattern)
+        self.assertNotRegex(sample_uuid, utf_pattern)
+
+        self.assertRegex("AAEC", base64_pattern)
+        self.assertNotRegex("not base64!", base64_pattern)
+        self.assertNotRegex("with space", utf_pattern)
+
+    def test_identifier_response_format_wraps_pattern_for_each_encoding(self) -> None:
+        for encoding in IDENTIFIER_PATTERNS:
+            with self.subTest(encoding=encoding):
+                schema = identifier_response_format(encoding)
+                json_schema = cast(dict[str, object], schema["json_schema"])
+                inner = cast(dict[str, object], json_schema["schema"])
+                properties = cast(dict[str, object], inner["properties"])
+                id_field = cast(dict[str, object], properties["id"])
+                self.assertEqual(id_field["pattern"], IDENTIFIER_PATTERNS[encoding])
+                self.assertEqual(id_field["maxLength"], IDENTIFIER_MAX_LENGTHS[encoding])
 
     def test_score_response_rejects_non_schema_output(self) -> None:
         sample = generate_sample(
@@ -192,7 +306,7 @@ class NiahIdentifierBenchmarkTests(unittest.TestCase):
             sample,
             json.dumps(
                 {
-                    "identifier": sample.needle_value_text,
+                    "id": sample.needle_value_text,
                     "explanation": "extra fields are not part of the contract",
                 }
             ),
@@ -291,6 +405,25 @@ class NiahIdentifierBenchmarkTests(unittest.TestCase):
             {("openai/gpt-5.4-mini", "raw_hex", 1)},
         )
 
+    def test_reasoning_config_uses_minimum_for_gemini_pro(self) -> None:
+        self.assertEqual(
+            _reasoning_config_for_model("google/gemini-2.5-pro"),
+            {"max_tokens": 128, "exclude": True},
+        )
+        self.assertEqual(
+            _reasoning_config_for_model("google/gemini-3-pro-preview"),
+            {"max_tokens": 128, "exclude": True},
+        )
+        self.assertEqual(
+            _reasoning_config_for_model("google/gemini-3-flash-preview"),
+            {"enabled": False},
+        )
+
+    def test_max_tokens_adds_reasoning_budget_for_gemini_pro(self) -> None:
+        self.assertEqual(_max_tokens_for_model("google/gemini-2.5-pro", 64), 192)
+        self.assertEqual(_max_tokens_for_model("google/gemini-3-pro-preview", 64), 192)
+        self.assertEqual(_max_tokens_for_model("google/gemini-3-flash-preview", 64), 64)
+
 
 class OpenRouterClientTests(unittest.TestCase):
     def test_complete_sends_openrouter_request_and_retries_transient_status(self) -> None:
@@ -320,11 +453,13 @@ class OpenRouterClientTests(unittest.TestCase):
             client=http_client,
         )
 
+        response_format = identifier_response_format("utf_token")
         result = client.complete(
             model_slug="model/test",
             prompt="Prompt",
             max_tokens=8,
-            response_format=IDENTIFIER_RESPONSE_FORMAT,
+            response_format=response_format,
+            reasoning={"enabled": False},
         )
 
         self.assertEqual(result.content, "Answer: abc123")
@@ -335,7 +470,8 @@ class OpenRouterClientTests(unittest.TestCase):
         payload = json.loads(requests[1].content)
         self.assertEqual(payload["model"], "model/test")
         self.assertEqual(payload["max_tokens"], 8)
-        self.assertEqual(payload["response_format"], IDENTIFIER_RESPONSE_FORMAT)
+        self.assertEqual(payload["response_format"], response_format)
+        self.assertEqual(payload["reasoning"], {"enabled": False})
 
 
 if __name__ == "__main__":

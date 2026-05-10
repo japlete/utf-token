@@ -5,8 +5,10 @@ import json
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from threading import RLock
-from typing import TypeAlias, cast, overload
+from typing import Literal, TypeAlias, cast, overload
 from uuid import UUID
+
+import Levenshtein
 
 from ._api import (
     Base64Value,
@@ -22,6 +24,18 @@ from ._tables import DEFAULT_VOCAB, VocabName
 
 FORMAT_VERSION = 3
 ForwardMapKey: TypeAlias = tuple[bytes, int | None]
+ErrorMode: TypeAlias = Literal["fix", "raise"]
+DEFAULT_ERROR_MODE: ErrorMode = "fix"
+
+
+def _validate_error_mode(value: object) -> ErrorMode:
+    if value == "fix":
+        return "fix"
+    if value == "raise":
+        return "raise"
+    raise ValueError(
+        f"Unsupported errors mode {value!r}; expected one of: 'fix', 'raise'"
+    )
 
 
 def _validate_vocab_name(value: str) -> VocabName:
@@ -54,6 +68,12 @@ class IdTokenBiMap:
         self._reverse_map: dict[str, StoredMapping] = {}
         self._forward_map: dict[ForwardMapKey, str] = {}
         self._lock = RLock()
+
+    def __contains__(self, item: object) -> bool:
+        if not isinstance(item, str):
+            return False
+        with self._lock:
+            return item in self._reverse_map
 
     def _store_mapping(
         self,
@@ -99,27 +119,53 @@ class IdTokenBiMap:
                 if mapping is None or mapping.original_bytes == data:
                     return self._store_mapping(encoded, data, truncate_bytes)
 
-    def _lookup_bytes_single(self, data: str) -> bytes | None:
+    def _find_nearest_encoded(self, data: str) -> str | None:
+        """Return the stored encoded identifier closest to `data`, or None if empty.
+
+        Tie-breaking is deterministic: candidates are ordered by
+        `(edit_distance, encoded_string)` and the first one wins.
+        """
+        if not self._reverse_map:
+            return None
+        best_distance: int | None = None
+        best_encoded: str | None = None
+        for encoded in self._reverse_map:
+            distance = Levenshtein.distance(data, encoded)
+            if best_distance is None or distance < best_distance or (
+                distance == best_distance
+                and best_encoded is not None
+                and encoded < best_encoded
+            ):
+                best_distance = distance
+                best_encoded = encoded
+        return best_encoded
+
+    def _lookup_bytes_single(self, data: str, errors: ErrorMode) -> bytes | None:
         with self._lock:
             mapping = self._reverse_map.get(data)
-            if mapping is None:
+            if mapping is not None:
+                return mapping.original_bytes
+            if errors == "raise":
+                raise KeyError(data)
+            nearest = self._find_nearest_encoded(data)
+            if nearest is None:
                 return None
-            return mapping.original_bytes
+            return self._reverse_map[nearest].original_bytes
 
-    def _lookup_hex_single(self, data: str) -> str | None:
-        value = self._lookup_bytes_single(data)
+    def _lookup_hex_single(self, data: str, errors: ErrorMode) -> str | None:
+        value = self._lookup_bytes_single(data, errors)
         if value is None:
             return None
         return value.hex()
 
-    def _lookup_base64_single(self, data: str) -> str | None:
-        value = self._lookup_bytes_single(data)
+    def _lookup_base64_single(self, data: str, errors: ErrorMode) -> str | None:
+        value = self._lookup_bytes_single(data, errors)
         if value is None:
             return None
         return base64.b64encode(value).decode("ascii")
 
-    def _lookup_uuid_single(self, data: str) -> UUID | None:
-        value = self._lookup_bytes_single(data)
+    def _lookup_uuid_single(self, data: str, errors: ErrorMode) -> UUID | None:
+        value = self._lookup_bytes_single(data, errors)
         if value is None:
             return None
         if len(value) != 16:
@@ -379,45 +425,121 @@ class IdTokenBiMap:
         )
 
     @overload
-    def tobytes(self, data: str, /) -> bytes | None: ...
+    def tobytes(
+        self,
+        data: str,
+        /,
+        *,
+        errors: ErrorMode = ...,
+    ) -> bytes | None: ...
 
     @overload
-    def tobytes(self, data: Iterable[str], /) -> Iterator[bytes | None]: ...
+    def tobytes(
+        self,
+        data: Iterable[str],
+        /,
+        *,
+        errors: ErrorMode = ...,
+    ) -> Iterator[bytes | None]: ...
 
-    def tobytes(self, data: str | Iterable[str], /) -> bytes | None | Iterator[bytes | None]:
+    def tobytes(
+        self,
+        data: str | Iterable[str],
+        /,
+        *,
+        errors: ErrorMode = DEFAULT_ERROR_MODE,
+    ) -> bytes | None | Iterator[bytes | None]:
+        mode = _validate_error_mode(errors)
         if isinstance(data, str):
-            return self._lookup_bytes_single(data)
-        return (self._lookup_bytes_single(item) for item in data)
+            return self._lookup_bytes_single(data, mode)
+        return (self._lookup_bytes_single(item, mode) for item in data)
 
     @overload
-    def tohex(self, data: str, /) -> str | None: ...
+    def tohex(
+        self,
+        data: str,
+        /,
+        *,
+        errors: ErrorMode = ...,
+    ) -> str | None: ...
 
     @overload
-    def tohex(self, data: Iterable[str], /) -> Iterator[str | None]: ...
+    def tohex(
+        self,
+        data: Iterable[str],
+        /,
+        *,
+        errors: ErrorMode = ...,
+    ) -> Iterator[str | None]: ...
 
-    def tohex(self, data: str | Iterable[str], /) -> str | None | Iterator[str | None]:
+    def tohex(
+        self,
+        data: str | Iterable[str],
+        /,
+        *,
+        errors: ErrorMode = DEFAULT_ERROR_MODE,
+    ) -> str | None | Iterator[str | None]:
+        mode = _validate_error_mode(errors)
         if isinstance(data, str):
-            return self._lookup_hex_single(data)
-        return (self._lookup_hex_single(item) for item in data)
+            return self._lookup_hex_single(data, mode)
+        return (self._lookup_hex_single(item, mode) for item in data)
 
     @overload
-    def tobase64(self, data: str, /) -> str | None: ...
+    def tobase64(
+        self,
+        data: str,
+        /,
+        *,
+        errors: ErrorMode = ...,
+    ) -> str | None: ...
 
     @overload
-    def tobase64(self, data: Iterable[str], /) -> Iterator[str | None]: ...
+    def tobase64(
+        self,
+        data: Iterable[str],
+        /,
+        *,
+        errors: ErrorMode = ...,
+    ) -> Iterator[str | None]: ...
 
-    def tobase64(self, data: str | Iterable[str], /) -> str | None | Iterator[str | None]:
+    def tobase64(
+        self,
+        data: str | Iterable[str],
+        /,
+        *,
+        errors: ErrorMode = DEFAULT_ERROR_MODE,
+    ) -> str | None | Iterator[str | None]:
+        mode = _validate_error_mode(errors)
         if isinstance(data, str):
-            return self._lookup_base64_single(data)
-        return (self._lookup_base64_single(item) for item in data)
+            return self._lookup_base64_single(data, mode)
+        return (self._lookup_base64_single(item, mode) for item in data)
 
     @overload
-    def touuid(self, data: str, /) -> UUID | None: ...
+    def touuid(
+        self,
+        data: str,
+        /,
+        *,
+        errors: ErrorMode = ...,
+    ) -> UUID | None: ...
 
     @overload
-    def touuid(self, data: Iterable[str], /) -> Iterator[UUID | None]: ...
+    def touuid(
+        self,
+        data: Iterable[str],
+        /,
+        *,
+        errors: ErrorMode = ...,
+    ) -> Iterator[UUID | None]: ...
 
-    def touuid(self, data: str | Iterable[str], /) -> UUID | None | Iterator[UUID | None]:
+    def touuid(
+        self,
+        data: str | Iterable[str],
+        /,
+        *,
+        errors: ErrorMode = DEFAULT_ERROR_MODE,
+    ) -> UUID | None | Iterator[UUID | None]:
+        mode = _validate_error_mode(errors)
         if isinstance(data, str):
-            return self._lookup_uuid_single(data)
-        return (self._lookup_uuid_single(item) for item in data)
+            return self._lookup_uuid_single(data, mode)
+        return (self._lookup_uuid_single(item, mode) for item in data)

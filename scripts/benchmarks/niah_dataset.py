@@ -12,34 +12,45 @@ from uuid import UUID
 
 from utf_token import IdTokenBiMap
 
-EncodingName: TypeAlias = Literal["raw_hex", "raw_base64", "raw_uuid", "utf_token"]
+EncodingName: TypeAlias = Literal[
+    "raw_hex",
+    "raw_base64",
+    "raw_uuid",
+    "utf_token",
+    "utf_token_truncate_3",
+]
 VocabName: TypeAlias = Literal["o200k", "gemma4"]
 
-ENCODINGS: tuple[EncodingName, ...] = ("raw_hex", "raw_base64", "raw_uuid", "utf_token")
-IDENTIFIER_FIELD = "identifier"
+ENCODINGS: tuple[EncodingName, ...] = (
+    "raw_hex",
+    "raw_base64",
+    "raw_uuid",
+    "utf_token",
+    "utf_token_truncate_3",
+)
+IDENTIFIER_FIELD = "id"
 
 IDENTIFIER_FORMAT_INSTRUCTIONS: dict[EncodingName, str] = {
     "raw_hex": (
-        "The identifier is lowercase hexadecimal. Copy exactly the full hex string "
-        "after id= for the requested key."
+        "The ids are lowercase hexadecimal that always go *after* the key= prefix, and end *before* a new line."
     ),
     "raw_base64": (
-        "The identifier is base64 and may contain +, /, and = padding. Copy exactly the "
-        "full base64 string after id= for the requested key."
+        "The ids are base64 and may contain +, /, and = padding. They always go *after* the key= prefix, and end *before* a new line."
     ),
     "raw_uuid": (
-        "The identifier is a UUID with hyphens. Copy exactly the full UUID after "
-        "id= for the requested key."
+        "The ids are UUIDs with hyphens. They always go *after* the key= prefix, and end *before* a new line."
     ),
     "utf_token": (
-        "The identifiers are encoded as compact LLM-friendly strings. They contain only "
-        "alphanumeric characters from any alphabet plus underscores. Any other "
-        "special character next to the identifiers, such as quotes, slashes, "
-        "brackets, commas, pipes, whitespace, new lines or other delimiters, marks where the "
-        "identifier starts or ends. Some identifiers may resemble real text, it's just a coincidence due to "
-        "the use of tokens. Copy exactly the full string after "
-        "id= for the requested key, up to where you hit a mentioned delimiter. "
-        "Do not decode, normalize, translate, split, or reformat the identifier. "
+        "The ids are random LLM tokens containing only ASCII alphanumeric or `_` characters. "
+        "They always go *after* the key= prefix, and end *before* a new line."
+        "Some ids may contain words or part of words, it's just a coincidence due to the use of tokens. "
+        "Do not translate or fix typos in the ids. Transcribe them **verbatim**."
+    ),
+    "utf_token_truncate_3": (
+        "The ids are random LLM tokens containing only ASCII alphanumeric or `_` characters. "
+        "They always go *after* the key= prefix, and end *before* a new line."
+        "Some ids may contain words or part of words, it's just a coincidence due to the use of tokens. "
+        "Do not translate or fix typos in the ids. Transcribe them **verbatim**."
     ),
 }
 
@@ -107,21 +118,23 @@ def render_identifier(payload: bytes, condition: EncodingCondition, codec: IdTok
         if len(payload) != 16:
             raise ValueError("UUID identifiers require 16-byte payloads")
         return str(UUID(bytes=payload))
+    if condition.encoding == "utf_token_truncate_3":
+        return codec.frombytes(payload, truncate_bytes=3)
     return codec.frombytes(payload)
 
 
 def build_prompt(context: str, needle_key: str, encoding: EncodingName) -> str:
     return "\n".join(
         [
-            "You are given many key/id records. Exactly one record contains the requested key.",
+            "You are given many key/id records. Exactly one record contains the requested key/id.",
             IDENTIFIER_FORMAT_INSTRUCTIONS[encoding],
-            'Return a JSON object with exactly one string field named "identifier".',
-            "Do not include any extra fields, markdown, or explanation.",
             "",
             "Records:",
             context,
             "",
-            f"Question: What is the identifier associated with key {needle_key}?",
+            f"Question: What is the id associated with key {needle_key}?",
+            'Return a JSON object with exactly one string field named "id".',
+            "Do not include any extra fields, markdown, or explanation.",
         ]
     )
 
@@ -345,12 +358,12 @@ def _is_format_valid(encoding: EncodingName, value: str, codec: IdTokenBiMap) ->
         return _is_base64(value)
     if encoding == "raw_uuid":
         return _is_uuid(value)
-    return codec.tobytes(value) is not None
+    return value in codec
 
 
 def _matches_expected(sample: NiahSample, normalized: str, expected_normalized: str) -> bool:
-    if sample.encoding == "utf_token":
-        return sample.codec.tobytes(normalized) == bytes.fromhex(sample.payload_hex)
+    if sample.encoding in ("utf_token", "utf_token_truncate_3"):
+        return sample.codec.tobytes(normalized, errors="fix") == bytes.fromhex(sample.payload_hex)
     return normalized == expected_normalized
 
 

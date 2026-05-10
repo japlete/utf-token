@@ -62,6 +62,7 @@ class OpenRouterClient:
         max_tokens: int,
         temperature: float = 0.0,
         response_format: dict[str, object] | None = None,
+        reasoning: dict[str, object] | None = None,
     ) -> CompletionResult:
         payload: dict[str, object] = {
             "model": model_slug,
@@ -69,12 +70,13 @@ class OpenRouterClient:
             "max_tokens": max_tokens,
             "temperature": temperature,
             "stream": False,
-            "reasoning": {"enabled": False}
         }
         if response_format is not None:
             payload["response_format"] = response_format
+        if reasoning is not None:
+            payload["reasoning"] = reasoning
         response = self._post_with_retry(payload)
-        response.raise_for_status()
+        _raise_for_status_with_body(response)
         return _parse_completion_response(response.json())
 
     def _post_with_retry(self, payload: dict[str, object]) -> httpx.Response:
@@ -115,6 +117,18 @@ class OpenRouterClient:
         if self._config.app_name is not None:
             headers["X-Title"] = self._config.app_name
         return headers
+
+
+def _raise_for_status_with_body(response: httpx.Response) -> None:
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        message = f"{exc}. Response body: {response.text}"
+        raise httpx.HTTPStatusError(
+            message,
+            request=exc.request,
+            response=exc.response,
+        ) from exc
 
 
 def _parse_completion_response(payload: Any) -> CompletionResult:

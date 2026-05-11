@@ -111,9 +111,7 @@ For the standalone functions, you specify the `vocab` parameter in the function 
 
 ## Included safe character set in tokens
 
-The lookup tables only contain tokens made from alphanumeric characters and underscore (`_`).
-
-Both `o200k` and `gemma4` are restricted to ASCII (`A-Z`, `a-z`, `0-9`, `_`) to avoid LLM confusion. The build pipeline first tries a curated Latin-script policy aimed at a 16-bit pair table, but neither shipped vocab supplies enough qualifying tokens, so both fall back to the 15-bit ASCII-only recipe. This trades a small efficiency loss (15-bit pair table) for higher transcription reliability on smaller LLMs that mistranscribe identifiers containing Devanagari, Arabic, Cuneiform, Mathematical or Fullwidth Latin variants.
+Both `o200k` and `gemma4` lookup tables are restricted to ASCII (`A-Z`, `a-z`, `0-9`, `_`) to avoid LLM confusion.
 
 Neither vocabulary emits quotes, slashes, brackets, commas, pipes, whitespace, or other delimiter characters, which makes the output easy to embed in JSON, Markdown, logs, tables, and prompts where the LLM or code needs to see clearly where an identifier begins and ends.
 
@@ -125,14 +123,11 @@ To avoid confusion when your agent sees these IDs, you can adapt these instructi
 
 #### Other recommendations for maximum reliability in identifier retrieval
 
-
 1. Use consistent delimiters to clearly separate identifiers from other text in the prompt.
 2. Use truncate_bytes to reduce identifier size and chances of error, while also reducing tokens and latency. But keep a minimum value of 3.
 3. Use structured outputs / JSON tools to request the identifiers. Provide a regex pattern such as `^[A-Za-z0-9_]+$` for the output strings in the JSON schema.
 4. Use smart models. For OpenAI, use at least GPT-5.4-mini (not nano). For Gemini, use at least Gemma 4. For Anthropic, use at least Haiku 4.5.
 5. Use low temperature if the model supports it.
-
-
 
 ## Retrieval benchmark
 

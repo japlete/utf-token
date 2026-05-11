@@ -125,14 +125,18 @@ To avoid confusion when your agent sees these IDs, you can adapt these instructi
 
 #### Other recommendations for maximum reliability in identifier retrieval
 
-1. Use low temperature if the model supports it.
-2. Use structured outputs / JSON tools to request the identifiers. Provide a regex pattern such as `^[A-Za-z0-9_]+$` for the output strings in the JSON schema.
-3. Use truncate_bytes to reduce identifier size and chances of error, while also reducing tokens and latency. But keep a minimum value of 3.
-4. Use consistent delimiters to clearly separate identifiers from other text in the prompt.
+
+1. Use consistent delimiters to clearly separate identifiers from other text in the prompt.
+2. Use truncate_bytes to reduce identifier size and chances of error, while also reducing tokens and latency. But keep a minimum value of 3.
+3. Use structured outputs / JSON tools to request the identifiers. Provide a regex pattern such as `^[A-Za-z0-9_]+$` for the output strings in the JSON schema.
+4. Use smart models. For OpenAI, use at least GPT-5.4-mini (not nano). For Gemini, use at least Gemma 4. For Anthropic, use at least Haiku 4.5.
+5. Use low temperature if the model supports it.
+
+
 
 ## Retrieval benchmark
 
-A NIAH-style benchmark is included to test small LLMs (GPT-5.4-nano, Gemma 4, Claude Haiku) on retrieval accuracy. With 100 samples for each model, and both full and truncated identifiers, the success rate is 100%. The context length is 32k tokens (calibrated for hex identifiers, then re-encoded for each encoding), and identifiers have 16 bytes of entropy.
+A NIAH-style benchmark is included to test small LLMs (GPT-5.4-mini, Gemma 4, Claude Haiku) on retrieval accuracy. With 100 samples for each model, and both full and truncated identifiers, the success rate is 100%. The context length is 32k tokens (calibrated for hex identifiers, then re-encoded for each encoding), and identifiers have 16 bytes of entropy.
 
 See [`docs/benchmarks_niah.md`](docs/benchmarks_niah.md).
 

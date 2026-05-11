@@ -40,11 +40,11 @@ DEFAULT_PROMPT_EXAMPLE_PATH = DEFAULT_OUTPUT_DIR / "niah_identifier_prompt_examp
 DEFAULT_SAMPLES_PER_CELL = 100
 DEFAULT_CONTEXT_LENGTH_TARGET = 32_000
 DEFAULT_DEPTH_PERCENT = 50.0
-DEFAULT_BASE_SEED = 41
+DEFAULT_BASE_SEED = 35
 DEFAULT_MAX_OUTPUT_TOKENS = 64
 DEFAULT_ENCODINGS: tuple[EncodingName, ...] = ("utf_token", "utf_token_truncate_3",)
 GEMINI_PRO_MIN_REASONING_TOKENS = 128
-RUN_ID = "niah_15bit_openai_all_encodings"
+RUN_ID = "niah_all_models_seed32"
 IDENTIFIER_PATTERNS: dict[EncodingName, str] = {
     "raw_hex": "^[0-9a-fA-F]+$",
     "raw_base64": "^[A-Za-z0-9+/]+={0,2}$",
@@ -95,9 +95,9 @@ class ModelSpec:
 
 
 MODEL_SPECS: tuple[ModelSpec, ...] = (
-    ModelSpec(slug="openai/gpt-5.4-nano", vocab="o200k"),
-    #ModelSpec(slug="google/gemma-4-26b-a4b-it", vocab="gemma4"),
-    #ModelSpec(slug="anthropic/claude-haiku-4.5", vocab="o200k"),
+    ModelSpec(slug="openai/gpt-5.4-mini", vocab="o200k"),
+    ModelSpec(slug="google/gemma-4-26b-a4b-it", vocab="gemma4"),
+    ModelSpec(slug="anthropic/claude-haiku-4.5", vocab="o200k"),
 )
 
 

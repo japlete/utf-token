@@ -41,8 +41,8 @@ This repo consists of a library (planned for Python and Typescript) that convert
 
 We work with the o200k OpenAI and Gemma4 token vocabs. For each vocab, [`scripts/process_token_vocab.py`](scripts/process_token_vocab.py) tries an ordered list of cleanup recipes and picks the first one that supplies enough tokens for both a pair table and a 256-entry tail table:
 
-1. `latin_16bit`: UTF-8 printable, alphanumeric or `_`, at most 10 characters long, plus precomposed letters from the Latin-1 Supplement (`U+00C0`-`U+00FF`) and Latin Extended-A (`U+0100`-`U+017F`) blocks. Targets `2^16 + 2^8` tokens (16-bit pair index).
-2. `ascii_15bit`: ASCII alphanumeric or `_` only, at most 10 characters long. Targets `2^15 + 2^8` tokens (15-bit pair index). Used as a fallback when a vocab does not have enough clean tokens for the 16-bit recipe.
+1. `latin_16bit`: UTF-8 printable, alphanumeric or `_`, at most 6 characters long, plus precomposed letters from the Latin-1 Supplement (`U+00C0`-`U+00FF`) and Latin Extended-A (`U+0100`-`U+017F`) blocks. Targets `2^16 + 2^8` tokens (16-bit pair index).
+2. `ascii_15bit`: ASCII alphanumeric or `_` only, at most 6 characters long. Targets `2^15 + 2^8` tokens (15-bit pair index). Used as a fallback when a vocab does not have enough clean tokens for the 16-bit recipe.
 
 Currently both `o200k` and `gemma4` land on `ascii_15bit`. The character and length policies are deliberate trade-offs: NIAH-style benchmarks showed that smaller LLMs mistranscribed identifiers that mixed unfamiliar scripts (Devanagari, Arabic, Cuneiform, Fullwidth or Mathematical Latin, etc.) or long, low-probability token fragments. The curated `latin_16bit` policy intentionally excludes those scripts, and the gemma4 vocab does not contain enough qualifying tokens to fill a 16-bit pair table, so it falls back to ASCII-only just like `o200k`. We sacrifice a small amount of efficiency for better visual reliability.
 

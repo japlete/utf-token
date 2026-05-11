@@ -15,7 +15,7 @@ import sentencepiece as spm
 DEFAULT_INPUT_PATH = Path("data/token_vocab/o200k_base.tiktoken")
 DEFAULT_OUTPUT_DIR = Path("data/lookup_tables")
 DEFAULT_TAIL_TABLE_SIZE = 1 << 8
-DEFAULT_MAX_TOKEN_LENGTH = 10
+DEFAULT_MAX_TOKEN_LENGTH = 6
 
 
 # Per-block ranges for the curated Latin allowlist used by `latin_16bit`.

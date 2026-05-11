@@ -4,7 +4,7 @@
   "recipe_description": "15-bit pair table; ASCII alnum or underscore only, for vocabs that cannot supply enough clean tokens for a 16-bit table.",
   "allowed_character_policy": "ASCII alphanumeric or underscore",
   "allowed_non_ascii_ranges": [],
-  "max_token_length": 10,
+  "max_token_length": 6,
   "pair_table_size": 32768,
   "pair_entry_count": 32768,
   "pair_index_bits": 15,

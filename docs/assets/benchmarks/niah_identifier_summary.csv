@@ -1,5 +1,6 @@
 model_slug,encoding,samples,exact_accuracy,normalized_accuracy,mean_latency_ms,error_count
-google/gemma-4-26b-a4b-it,utf_token,200,0.96,0.98,3489.935,0
-google/gemma-4-26b-a4b-it,utf_token_truncate_3,200,1.0,1.0,2178.56,0
-openai/gpt-5.4-nano,utf_token,100,0.96,1.0,1281.46,0
-openai/gpt-5.4-nano,utf_token_truncate_3,100,0.97,1.0,1093.04,0
+openai/gpt-5.4-nano,raw_base64,100,0.99,0.99,1228.3,0
+openai/gpt-5.4-nano,raw_hex,100,1.0,1.0,1298.35,0
+openai/gpt-5.4-nano,raw_uuid,100,1.0,1.0,1376.36,0
+openai/gpt-5.4-nano,utf_token,200,0.975,0.99,1201.1,0
+openai/gpt-5.4-nano,utf_token_truncate_3,200,0.98,0.995,1011.9,0

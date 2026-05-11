@@ -42,9 +42,9 @@ DEFAULT_CONTEXT_LENGTH_TARGET = 32_000
 DEFAULT_DEPTH_PERCENT = 50.0
 DEFAULT_BASE_SEED = 41
 DEFAULT_MAX_OUTPUT_TOKENS = 64
-DEFAULT_ENCODINGS: tuple[EncodingName, ...] = ("utf_token", "utf_token_truncate_3")
+DEFAULT_ENCODINGS: tuple[EncodingName, ...] = ("utf_token", "utf_token_truncate_3",)
 GEMINI_PRO_MIN_REASONING_TOKENS = 128
-RUN_ID = "niah_15bit_3models_utfencodings_healing_100samples"
+RUN_ID = "niah_15bit_openai_all_encodings"
 IDENTIFIER_PATTERNS: dict[EncodingName, str] = {
     "raw_hex": "^[0-9a-fA-F]+$",
     "raw_base64": "^[A-Za-z0-9+/]+={0,2}$",
@@ -60,8 +60,8 @@ IDENTIFIER_MAX_LENGTHS: dict[EncodingName, int] = {
     "raw_hex": 32,
     "raw_base64": 24,
     "raw_uuid": 36,
-    "utf_token": 90,
-    "utf_token_truncate_3": 90,
+    "utf_token": 54,
+    "utf_token_truncate_3": 12,
 }
 
 
@@ -96,8 +96,8 @@ class ModelSpec:
 
 MODEL_SPECS: tuple[ModelSpec, ...] = (
     ModelSpec(slug="openai/gpt-5.4-nano", vocab="o200k"),
-    ModelSpec(slug="google/gemma-4-26b-a4b-it", vocab="gemma4"),
-    ModelSpec(slug="anthropic/claude-haiku-4.5", vocab="o200k"),
+    #ModelSpec(slug="google/gemma-4-26b-a4b-it", vocab="gemma4"),
+    #ModelSpec(slug="anthropic/claude-haiku-4.5", vocab="o200k"),
 )
 
 

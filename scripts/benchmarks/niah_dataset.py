@@ -32,23 +32,23 @@ IDENTIFIER_FIELD = "id"
 
 IDENTIFIER_FORMAT_INSTRUCTIONS: dict[EncodingName, str] = {
     "raw_hex": (
-        "The ids are lowercase hexadecimal that always go *after* the key= prefix, and end *before* a new line."
+        "The ids are lowercase hexadecimal that always start *after* the key= prefix, and end *before* a new line."
     ),
     "raw_base64": (
-        "The ids are base64 and may contain +, /, and = padding. They always go *after* the key= prefix, and end *before* a new line."
+        "The ids are base64 and may contain +, /, and = padding. They always start *after* the key= prefix, and end *before* a new line."
     ),
     "raw_uuid": (
-        "The ids are UUIDs with hyphens. They always go *after* the key= prefix, and end *before* a new line."
+        "The ids are UUIDs with hyphens. They always start *after* the key= prefix, and end *before* a new line."
     ),
     "utf_token": (
-        "The ids are random LLM tokens containing only ASCII alphanumeric or `_` characters. "
-        "They always go *after* the key= prefix, and end *before* a new line."
+        "The ids are random LLM token sequences containing only ASCII alphanumeric or `_` characters. "
+        "They always start *after* the key= prefix, and end *before* a new line."
         "Some ids may contain words or part of words, it's just a coincidence due to the use of tokens. "
         "Do not translate or fix typos in the ids. Transcribe them **verbatim**."
     ),
     "utf_token_truncate_3": (
-        "The ids are random LLM tokens containing only ASCII alphanumeric or `_` characters. "
-        "They always go *after* the key= prefix, and end *before* a new line."
+        "The ids are random LLM token sequences containing only ASCII alphanumeric or `_` characters. "
+        "They always start *after* the key= prefix, and end *before* a new line."
         "Some ids may contain words or part of words, it's just a coincidence due to the use of tokens. "
         "Do not translate or fix typos in the ids. Transcribe them **verbatim**."
     ),

@@ -2,11 +2,9 @@
 
 Convert random string identifiers to a LLM-friendly format to reduce token usage in certain retrieval and agentic tasks.
 
-`utf-token` encodes only the first three bytes of each identifier by default, so any payload — UUIDs, hex hashes, base64 ids — typically becomes about two `o200k_base` tokens regardless of its original length:
+`utf-token` encodes the identifier into a 2-token sequence by default with 24 bits of entropy. Collisions are prevented automatically and the conversion is fully reversible.
 
 ![token savings vs hex, base64, and uuid](docs/assets/benchmarks/token_savings.png)
-
-The conversion stays fully reversible through `IdTokenBiMap`, which stores the original bytes behind every generated string.
 
 ## Install
 
@@ -14,17 +12,23 @@ The conversion stays fully reversible through `IdTokenBiMap`, which stores the o
 uv add utf-token
 ```
 
-## Reversible mapping with `IdTokenBiMap`
+## Usage
 
-`IdTokenBiMap` is the main API. It encodes identifiers and stores the full original bytes so you can recover them later, even when only a prefix was actually encoded.
+The `IdTokenBiMap` class is used to encode identifiers and store the full original bytes so you can recover them later.
 
 ```python
 from utf_token import IdTokenBiMap
 
 bimap = IdTokenBiMap()
 
-uuid_tokens = bimap.fromuuid("123e4567-e89b-12d3-a456-426614174000")
-original_uuid = bimap.touuid(uuid_tokens)
+hex_str = "215aada34d0987ebfb9de132d913e46b"
+# 17 tokens: 215 a ada 34 d 098 7 eb fb 9 de 132 d 913 e 46 b
+
+token_hex = bimap.fromhex(hex_str)
+print(token_hex)
+# 2 tokens: cripts 16
+
+reconstructed_hex = bimap.tohex(token_hex) # Recovers the original hex string
 ```
 
 Forward methods: `frombytes`, `fromhex`, `frombase64`, `fromuuid`.
@@ -34,6 +38,28 @@ Both forward and reverse methods accept either:
 
 - a single value -> returns one encoded `str` (or recovered value)
 - an iterable of values -> returns a lazy iterator
+
+### Persisting the reversible map
+
+The internal map in `IdTokenBiMap` can be saved and restored to transfer offline conversions for online usage:
+
+- `to_dict` / `from_dict`
+- `to_json` / `from_json`
+
+`from_dict` accepts `null`, a positive integer, or the string `"all"` for each `keep_bytes` value. The canonical export always uses `null` for full-input encodings.
+
+## Optional arguments
+
+### LLM - token vocabulary pairing
+
+Pick the token vocabulary that matches the model you are using. Current options are:
+
+- Default: `o200k` (OpenAI GPT-5+)
+- `gemma4` (Google Gemma 4)
+
+```python
+bimap = IdTokenBiMap(vocab="gemma4")
+```
 
 ### Controlling how many bytes are encoded with `keep_bytes`
 
@@ -73,15 +99,6 @@ if encoded in bimap:                                     # supports membership c
     print("This will print")
 ```
 
-### Persisting the reversible map
-
-The internal map in `IdTokenBiMap` can be saved and restored:
-
-- `to_dict` / `from_dict`
-- `to_json` / `from_json`
-
-`from_dict` accepts `null`, a positive integer, or the string `"all"` for each `keep_bytes` value. The canonical export always uses `null` for full-input encodings.
-
 ## Standalone forward-only helpers
 
 `frombytes`, `fromhex`, `frombase64`, and `fromuuid` are also available as standalone module-level functions. They perform only the forward conversion, and they default to keeping the full input rather than truncating. They are useful when you want to plug `utf-token` into your own data flow or build your own reverse-lookup table:
@@ -95,17 +112,6 @@ short_hex = fromhex(my_hex, keep_bytes=3)                # only first 3 bytes
 ```
 
 Both `keep_bytes=None` and `keep_bytes="all"` keep the full input.
-
-## Supported token vocabularies
-
-Pick the token vocabulary that matches the model you are using. Current options are:
-
-- Default: `o200k` (OpenAI GPT-5+)
-- `gemma4` (Google Gemma 4)
-
-```python
-bimap = IdTokenBiMap(vocab="gemma4")
-```
 
 For the standalone functions, pass the `vocab` parameter in the call.
 
@@ -146,15 +152,3 @@ For 15-bit pair tables (both shipped vocabs) the encoder treats the input as an 
 `IdTokenBiMap` keeps a forward map and a reverse map so the generated string can be resolved back to the original bytes later. The default `keep_bytes=3` means each identifier consumes about two tokens regardless of its original size; reverse lookups still return the full bytes that were passed in.
 
 Collisions can happen when different inputs produce the same encoded string, especially when `keep_bytes` truncates them to a short prefix. When `IdTokenBiMap` sees that a new value would collide with an existing one, it deterministically moves to the next byte sequence until it finds an unused encoded string. The stored reverse map still points that generated string back to the original full input.
-
-## Reproducing the savings plot
-
-```shell
-uv run --group offline scripts/token_savings_examples.py
-```
-
-This regenerates [`docs/assets/benchmarks/token_savings.png`](docs/assets/benchmarks/token_savings.png) from random payloads of 4 to 32 bytes.
-
-## Project and release docs
-
-For contributor workflows (testing, packaging, and release process), see `docs/releasing.md`.

@@ -5,10 +5,10 @@
 | anthropic/claude-haiku-4.5 | raw_hex | 10 | 1.000 | 1.000 | 4903.000 | 0 |
 | anthropic/claude-haiku-4.5 | raw_uuid | 10 | 1.000 | 1.000 | 4847.700 | 0 |
 | anthropic/claude-haiku-4.5 | utf_token | 10 | 1.000 | 1.000 | 4632.000 | 0 |
-| anthropic/claude-haiku-4.5 | utf_token_truncate_3 | 10 | 1.000 | 1.000 | 2517.300 | 0 |
+| anthropic/claude-haiku-4.5 | utf_token_keep_3 | 10 | 1.000 | 1.000 | 2517.300 | 0 |
 | google/gemma-4-26b-a4b-it | numeric_index | 10 | 1.000 | 1.000 | 8156.900 | 0 |
 | google/gemma-4-26b-a4b-it | raw_base64 | 10 | 1.000 | 1.000 | 29992.600 | 0 |
 | google/gemma-4-26b-a4b-it | raw_hex | 10 | 1.000 | 1.000 | 27735.300 | 0 |
 | google/gemma-4-26b-a4b-it | raw_uuid | 10 | 1.000 | 1.000 | 36890.400 | 0 |
 | google/gemma-4-26b-a4b-it | utf_token | 10 | 1.000 | 1.000 | 11292.600 | 0 |
-| google/gemma-4-26b-a4b-it | utf_token_truncate_3 | 10 | 1.000 | 1.000 | 8250.700 | 0 |
+| google/gemma-4-26b-a4b-it | utf_token_keep_3 | 10 | 1.000 | 1.000 | 8250.700 | 0 |

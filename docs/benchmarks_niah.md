@@ -2,7 +2,7 @@
 
 This benchmark checks whether `utf-token`-encoded random identifiers hurt long-context
 retrieval accuracy. The default run compares full `utf-token` identifiers with identifiers
-generated using `truncate_bytes=3`; raw `hex`, `base64`, and `uuid` baselines are available
+generated using `keep_bytes=3`; raw `hex`, `base64`, and `uuid` baselines are available
 with `--all-encodings`.
 
 It is inspired by Needle-In-A-Haystack (NIAH): a target identifier is embedded among many
@@ -21,7 +21,7 @@ identifier encoding:
 - Needle depth: 50% of the generated record list.
 - Payload size: 16 bytes, so every sample has a UUID representation.
 - Samples per cell: 100 by default.
-- Default encodings: `utf_token` and `utf_token_truncate_3`.
+- Default encodings: `utf_token` and `utf_token_keep_3`.
 - Total default calls: 2 encodings x 3 models x 100 samples = 600 OpenRouter calls.
 - With `--all-encodings`: 5 encodings x 3 models x 100 samples = 1,500 OpenRouter calls.
 

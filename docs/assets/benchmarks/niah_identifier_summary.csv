@@ -4,10 +4,10 @@ anthropic/claude-haiku-4.5,raw_base64,10,1.0,1.0,4242.3,0
 anthropic/claude-haiku-4.5,raw_hex,10,1.0,1.0,4903.0,0
 anthropic/claude-haiku-4.5,raw_uuid,10,1.0,1.0,4847.7,0
 anthropic/claude-haiku-4.5,utf_token,10,1.0,1.0,4632.0,0
-anthropic/claude-haiku-4.5,utf_token_truncate_3,10,1.0,1.0,2517.3,0
+anthropic/claude-haiku-4.5,utf_token_keep_3,10,1.0,1.0,2517.3,0
 google/gemma-4-26b-a4b-it,numeric_index,10,1.0,1.0,8156.9,0
 google/gemma-4-26b-a4b-it,raw_base64,10,1.0,1.0,29992.6,0
 google/gemma-4-26b-a4b-it,raw_hex,10,1.0,1.0,27735.3,0
 google/gemma-4-26b-a4b-it,raw_uuid,10,1.0,1.0,36890.4,0
 google/gemma-4-26b-a4b-it,utf_token,10,1.0,1.0,11292.6,0
-google/gemma-4-26b-a4b-it,utf_token_truncate_3,10,1.0,1.0,8250.7,0
+google/gemma-4-26b-a4b-it,utf_token_keep_3,10,1.0,1.0,8250.7,0

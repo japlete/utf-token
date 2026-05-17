@@ -17,7 +17,7 @@ EncodingName: TypeAlias = Literal[
     "raw_base64",
     "raw_uuid",
     "utf_token",
-    "utf_token_truncate_3",
+    "utf_token_keep_3",
     "numeric_index",
 ]
 VocabName: TypeAlias = Literal["o200k", "gemma4"]
@@ -27,7 +27,7 @@ ENCODINGS: tuple[EncodingName, ...] = (
     "raw_base64",
     "raw_uuid",
     "utf_token",
-    "utf_token_truncate_3",
+    "utf_token_keep_3",
     "numeric_index",
 )
 IDENTIFIER_FIELD = "id"
@@ -48,7 +48,7 @@ IDENTIFIER_FORMAT_INSTRUCTIONS: dict[EncodingName, str] = {
         "Some ids may contain words or part of words, it's just a coincidence due to the use of tokens. "
         "Do not translate or fix typos in the ids. Transcribe them **verbatim**."
     ),
-    "utf_token_truncate_3": (
+    "utf_token_keep_3": (
         "The ids are random LLM token sequences containing only ASCII alphanumeric or `_` characters. "
         "They always start *after* the key= prefix, and end *before* a new line."
         "Some ids may contain words or part of words, it's just a coincidence due to the use of tokens. "
@@ -125,8 +125,8 @@ def render_identifier(payload: bytes, condition: EncodingCondition, codec: IdTok
         if len(payload) != 16:
             raise ValueError("UUID identifiers require 16-byte payloads")
         return str(UUID(bytes=payload))
-    if condition.encoding == "utf_token_truncate_3":
-        return codec.frombytes(payload, truncate_bytes=3)
+    if condition.encoding == "utf_token_keep_3":
+        return codec.frombytes(payload, keep_bytes=3)
     return codec.frombytes(payload)
 
 
@@ -402,7 +402,7 @@ def _is_format_valid(encoding: EncodingName, value: str, codec: IdTokenBiMap) ->
 
 
 def _matches_expected(sample: NiahSample, normalized: str, expected_normalized: str) -> bool:
-    if sample.encoding in ("utf_token", "utf_token_truncate_3"):
+    if sample.encoding in ("utf_token", "utf_token_keep_3"):
         return sample.codec.tobytes(normalized, errors="fix") == bytes.fromhex(sample.payload_hex)
     return normalized == expected_normalized
 

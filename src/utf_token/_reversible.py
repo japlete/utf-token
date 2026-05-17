@@ -18,7 +18,7 @@ from ._api import (
     _decode_uuid_bytes,
     _encode_bytes_single,
     _truncate_input,
-    _validate_truncate_bytes,
+    _validate_keep_bytes,
 )
 from ._tables import DEFAULT_VOCAB, VocabName
 
@@ -79,37 +79,37 @@ class IdTokenBiMap:
         self,
         encoded: str,
         original_bytes: bytes,
-        truncate_bytes: int | None,
+        keep_bytes: int | None,
     ) -> str:
         mapping = self._reverse_map.get(encoded)
         if mapping is None:
             self._reverse_map[encoded] = StoredMapping(
                 original_bytes=original_bytes,
-                encodings={truncate_bytes},
+                encodings={keep_bytes},
             )
         else:
-            mapping.encodings.add(truncate_bytes)
-        self._forward_map[(original_bytes, truncate_bytes)] = encoded
+            mapping.encodings.add(keep_bytes)
+        self._forward_map[(original_bytes, keep_bytes)] = encoded
         return encoded
 
     def _encode_and_store_single(
         self,
         data: bytes,
         *,
-        truncate_bytes: int | None = None,
+        keep_bytes: int | None = None,
     ) -> str:
-        truncate_bytes = _validate_truncate_bytes(truncate_bytes)
-        key = (data, truncate_bytes)
+        keep_bytes = _validate_keep_bytes(keep_bytes)
+        key = (data, keep_bytes)
         with self._lock:
             cached = self._forward_map.get(key)
             if cached is not None:
                 return cached
 
-            working_bytes = _truncate_input(data, truncate_bytes=truncate_bytes)
+            working_bytes = _truncate_input(data, keep_bytes=keep_bytes)
             encoded = _encode_bytes_single(working_bytes, vocab=self._vocab)
             mapping = self._reverse_map.get(encoded)
             if mapping is None or mapping.original_bytes == data:
-                return self._store_mapping(encoded, data, truncate_bytes)
+                return self._store_mapping(encoded, data, keep_bytes)
 
             candidate = working_bytes
             while True:
@@ -117,7 +117,7 @@ class IdTokenBiMap:
                 encoded = _encode_bytes_single(candidate, vocab=self._vocab)
                 mapping = self._reverse_map.get(encoded)
                 if mapping is None or mapping.original_bytes == data:
-                    return self._store_mapping(encoded, data, truncate_bytes)
+                    return self._store_mapping(encoded, data, keep_bytes)
 
     def _find_nearest_encoded(self, data: str) -> str | None:
         """Return the stored encoded identifier closest to `data`, or None if empty.
@@ -183,8 +183,8 @@ class IdTokenBiMap:
                 mappings[encoded] = {
                     "original_hex": mapping.original_bytes.hex(),
                     "encodings": [
-                        {"truncate_bytes": truncate_bytes}
-                        for truncate_bytes in sorted(
+                        {"keep_bytes": keep_bytes}
+                        for keep_bytes in sorted(
                             mapping.encodings,
                             key=_encoding_sort_key,
                         )
@@ -241,16 +241,16 @@ class IdTokenBiMap:
                     raise ValueError(f"Mapping entry for {encoded!r} has a non-object encoding")
                 encoding_dict = cast(dict[str, object], item)
 
-                if "truncate_bytes" not in encoding_dict:
+                if "keep_bytes" not in encoding_dict:
                     raise ValueError(
-                        f"Mapping entry for {encoded!r} is missing encoding truncate_bytes"
+                        f"Mapping entry for {encoded!r} is missing encoding keep_bytes"
                     )
-                truncate_obj = encoding_dict.get("truncate_bytes")
+                truncate_obj = encoding_dict.get("keep_bytes")
                 if truncate_obj is not None and not isinstance(truncate_obj, int):
                     raise ValueError(
-                        f"Mapping entry for {encoded!r} has a non-integer truncate_bytes"
+                        f"Mapping entry for {encoded!r} has a non-integer keep_bytes"
                     )
-                encodings.add(_validate_truncate_bytes(truncate_obj))
+                encodings.add(_validate_keep_bytes(truncate_obj))
 
             if not encodings:
                 raise ValueError(f"Mapping entry for {encoded!r} must list at least one encoding")
@@ -259,13 +259,13 @@ class IdTokenBiMap:
                 original_bytes=original_bytes,
                 encodings=set(encodings),
             )
-            for truncate_bytes in encodings:
-                key = (original_bytes, truncate_bytes)
+            for keep_bytes in encodings:
+                key = (original_bytes, keep_bytes)
                 existing = instance._forward_map.get(key)
                 if existing is not None and existing != encoded:
                     raise ValueError(
                         "Conflicting mapping import for "
-                        f"{original_hex!r} with truncate_bytes={truncate_bytes!r}"
+                        f"{original_hex!r} with keep_bytes={keep_bytes!r}"
                     )
                 instance._forward_map[key] = encoded
 
@@ -284,7 +284,7 @@ class IdTokenBiMap:
         data: bytes,
         /,
         *,
-        truncate_bytes: int | None = None,
+        keep_bytes: int | None = None,
     ) -> str: ...
 
     @overload
@@ -293,7 +293,7 @@ class IdTokenBiMap:
         data: Iterable[bytes],
         /,
         *,
-        truncate_bytes: int | None = None,
+        keep_bytes: int | None = None,
     ) -> Iterator[str]: ...
 
     def frombytes(
@@ -301,12 +301,12 @@ class IdTokenBiMap:
         data: bytes | Iterable[bytes],
         /,
         *,
-        truncate_bytes: int | None = None,
+        keep_bytes: int | None = None,
     ) -> str | Iterator[str]:
         if isinstance(data, bytes):
-            return self._encode_and_store_single(data, truncate_bytes=truncate_bytes)
+            return self._encode_and_store_single(data, keep_bytes=keep_bytes)
         return (
-            self._encode_and_store_single(item, truncate_bytes=truncate_bytes)
+            self._encode_and_store_single(item, keep_bytes=keep_bytes)
             for item in data
         )
 
@@ -316,7 +316,7 @@ class IdTokenBiMap:
         data: str,
         /,
         *,
-        truncate_bytes: int | None = None,
+        keep_bytes: int | None = None,
     ) -> str: ...
 
     @overload
@@ -325,7 +325,7 @@ class IdTokenBiMap:
         data: Iterable[str],
         /,
         *,
-        truncate_bytes: int | None = None,
+        keep_bytes: int | None = None,
     ) -> Iterator[str]: ...
 
     def fromhex(
@@ -333,17 +333,17 @@ class IdTokenBiMap:
         data: str | Iterable[str],
         /,
         *,
-        truncate_bytes: int | None = None,
+        keep_bytes: int | None = None,
     ) -> str | Iterator[str]:
         if isinstance(data, str):
             return self._encode_and_store_single(
                 _decode_hex_bytes(data),
-                truncate_bytes=truncate_bytes,
+                keep_bytes=keep_bytes,
             )
         return (
             self._encode_and_store_single(
                 _decode_hex_bytes(item),
-                truncate_bytes=truncate_bytes,
+                keep_bytes=keep_bytes,
             )
             for item in data
         )
@@ -354,7 +354,7 @@ class IdTokenBiMap:
         data: Base64Value,
         /,
         *,
-        truncate_bytes: int | None = None,
+        keep_bytes: int | None = None,
     ) -> str: ...
 
     @overload
@@ -363,7 +363,7 @@ class IdTokenBiMap:
         data: Iterable[Base64Value],
         /,
         *,
-        truncate_bytes: int | None = None,
+        keep_bytes: int | None = None,
     ) -> Iterator[str]: ...
 
     def frombase64(
@@ -371,17 +371,17 @@ class IdTokenBiMap:
         data: Base64Value | Iterable[Base64Value],
         /,
         *,
-        truncate_bytes: int | None = None,
+        keep_bytes: int | None = None,
     ) -> str | Iterator[str]:
         if isinstance(data, (str, bytes)):
             return self._encode_and_store_single(
                 _decode_base64_bytes(data),
-                truncate_bytes=truncate_bytes,
+                keep_bytes=keep_bytes,
             )
         return (
             self._encode_and_store_single(
                 _decode_base64_bytes(item),
-                truncate_bytes=truncate_bytes,
+                keep_bytes=keep_bytes,
             )
             for item in data
         )
@@ -392,7 +392,7 @@ class IdTokenBiMap:
         data: UUIDValue,
         /,
         *,
-        truncate_bytes: int | None = None,
+        keep_bytes: int | None = None,
     ) -> str: ...
 
     @overload
@@ -401,7 +401,7 @@ class IdTokenBiMap:
         data: Iterable[UUIDValue],
         /,
         *,
-        truncate_bytes: int | None = None,
+        keep_bytes: int | None = None,
     ) -> Iterator[str]: ...
 
     def fromuuid(
@@ -409,17 +409,17 @@ class IdTokenBiMap:
         data: UUIDValue | Iterable[UUIDValue],
         /,
         *,
-        truncate_bytes: int | None = None,
+        keep_bytes: int | None = None,
     ) -> str | Iterator[str]:
         if isinstance(data, (UUID, str)):
             return self._encode_and_store_single(
                 _decode_uuid_bytes(data),
-                truncate_bytes=truncate_bytes,
+                keep_bytes=keep_bytes,
             )
         return (
             self._encode_and_store_single(
                 _decode_uuid_bytes(item),
-                truncate_bytes=truncate_bytes,
+                keep_bytes=keep_bytes,
             )
             for item in data
         )

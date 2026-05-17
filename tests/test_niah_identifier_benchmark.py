@@ -106,7 +106,7 @@ class NiahIdentifierBenchmarkTests(unittest.TestCase):
         )
         truncated_utf_token_text = render_identifier(
             payload,
-            EncodingCondition(encoding="utf_token_truncate_3", vocab="gemma4"),
+            EncodingCondition(encoding="utf_token_keep_3", vocab="gemma4"),
             codec,
         )
 
@@ -183,7 +183,7 @@ class NiahIdentifierBenchmarkTests(unittest.TestCase):
     def test_truncated_utf_token_scores_by_reversible_mapping(self) -> None:
         sample = generate_sample(
             BenchmarkConfig(context_length_target=50),
-            EncodingCondition(encoding="utf_token_truncate_3", vocab="o200k"),
+            EncodingCondition(encoding="utf_token_keep_3", vocab="o200k"),
             sample_index=1,
             record_count=10,
             context_character_target=500,
@@ -293,7 +293,7 @@ class NiahIdentifierBenchmarkTests(unittest.TestCase):
             ("raw_base64", "o200k"),
             ("raw_uuid", "o200k"),
             ("utf_token", "gemma4"),
-            ("utf_token_truncate_3", "gemma4"),
+            ("utf_token_keep_3", "gemma4"),
             ("numeric_index", "o200k"),
         ]
         for encoding, vocab in cases:

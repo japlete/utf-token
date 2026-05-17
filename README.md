@@ -55,12 +55,12 @@ Both forward and reverse methods accept either:
 - a single value -> returns one encoded `str`
 - an iterable of values -> returns a lazy iterator of encoded `str`
 
-### Save more tokens with `truncate_bytes`
+### Save more tokens with `keep_bytes`
 
-All forward methods also accept `truncate_bytes=<positive int>` to encode only the first N bytes of the input.
+All forward methods also accept `keep_bytes=<positive int>` to encode only the first N bytes of the input.
 
 ```python
-token = bimap.frombytes(b"\x01\x02\x03\x04\x05\x06", truncate_bytes=4)
+token = bimap.frombytes(b"\x01\x02\x03\x04\x05\x06", keep_bytes=4)
 ```
 
 Reverse lookups still return the *full original identifier* pre-truncation, so you can reduce token usage without losing round-trip reversibility.
@@ -85,7 +85,7 @@ if encoded in bimap:                                     # Supports membership c
     print("This will print")
 ```
 
-The make the healing work with very high reliability, don't use a very low value of `truncate_bytes`. Keep a minimum of 3 bytes to avoid false matches.
+The make the healing work with very high reliability, don't use a very low value of `keep_bytes`. Keep a minimum of 3 bytes to avoid false matches.
 
 ### Persisting the reversible map
 
@@ -124,7 +124,7 @@ To avoid confusion when your agent sees these IDs, you can adapt these instructi
 #### Other recommendations for maximum reliability in identifier retrieval
 
 1. Use consistent delimiters to clearly separate identifiers from other text in the prompt.
-2. Use truncate_bytes to reduce identifier size and chances of error, while also reducing tokens and latency. But keep a minimum value of 3.
+2. Use keep_bytes to reduce identifier size and chances of error, while also reducing tokens and latency. But keep a minimum value of 3.
 3. Use structured outputs / JSON tools to request the identifiers. Provide a regex pattern such as `^[A-Za-z0-9_]+$` for the output strings in the JSON schema.
 4. Use smart models. For OpenAI, use at least GPT-5.4-mini (not nano). For Gemini, use at least Gemma 4. For Anthropic, use at least Haiku 4.5.
 5. Use low temperature if the model supports it.
@@ -147,7 +147,7 @@ That makes a 16-byte UUID typically become 9 tokens, instead of the much larger 
 
 The standalone helpers only perform the forward conversion. `IdTokenBiMap` keeps both a forward map and a reverse map so the generated string can be resolved back to the original bytes later.
 
-Collisions can happen when different inputs produce the same encoded string, especially when `truncate_bytes` is used. When `IdTokenBiMap` sees that a new value would collide with an existing value, it deterministically moves to the next byte sequence until it finds an unused encoded string. The stored reverse map still points that generated string back to the original full input.
+Collisions can happen when different inputs produce the same encoded string, especially when `keep_bytes` is used. When `IdTokenBiMap` sees that a new value would collide with an existing value, it deterministically moves to the next byte sequence until it finds an unused encoded string. The stored reverse map still points that generated string back to the original full input.
 
 ## Project and release docs
 

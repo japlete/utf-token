@@ -44,7 +44,7 @@ DEFAULT_BASE_SEED = 39
 DEFAULT_MAX_OUTPUT_TOKENS = 64
 DEFAULT_ENCODINGS: tuple[EncodingName, ...] = (
     "utf_token",
-    "utf_token_truncate_3",
+    "utf_token_keep_3",
 )
 GEMINI_PRO_MIN_REASONING_TOKENS = 128
 RUN_ID = "niah_seed39"
@@ -56,7 +56,7 @@ IDENTIFIER_PATTERNS: dict[EncodingName, str] = {
         "[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
     ),
     "utf_token": "^[A-Za-z0-9_]+$",
-    "utf_token_truncate_3": "^[A-Za-z0-9_]+$",
+    "utf_token_keep_3": "^[A-Za-z0-9_]+$",
     "numeric_index": "^[0-9]+$",
 }
 
@@ -65,7 +65,7 @@ IDENTIFIER_MAX_LENGTHS: dict[EncodingName, int] = {
     "raw_base64": 24,
     "raw_uuid": 36,
     "utf_token": 54,
-    "utf_token_truncate_3": 12,
+    "utf_token_keep_3": 12,
     "numeric_index": 10,
 }
 

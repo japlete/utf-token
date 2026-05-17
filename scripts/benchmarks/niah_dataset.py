@@ -116,6 +116,14 @@ def make_payload(seed: int, payload_bytes: int) -> bytes:
     return Random(seed).randbytes(payload_bytes)
 
 
+def codec_for_condition(condition: EncodingCondition) -> IdTokenBiMap:
+    if condition.encoding == "utf_token_keep_3":
+        return IdTokenBiMap(condition.vocab, keep_bytes=3)
+    if condition.encoding == "utf_token":
+        return IdTokenBiMap(condition.vocab, keep_bytes=None)
+    return IdTokenBiMap(condition.vocab)
+
+
 def render_identifier(payload: bytes, condition: EncodingCondition, codec: IdTokenBiMap) -> str:
     if condition.encoding == "raw_hex":
         return payload.hex()
@@ -125,9 +133,9 @@ def render_identifier(payload: bytes, condition: EncodingCondition, codec: IdTok
         if len(payload) != 16:
             raise ValueError("UUID identifiers require 16-byte payloads")
         return str(UUID(bytes=payload))
-    if condition.encoding == "utf_token_keep_3":
-        return codec.frombytes(payload, keep_bytes=3)
-    return codec.frombytes(payload, keep_bytes=None)
+    if condition.encoding in ("utf_token", "utf_token_keep_3"):
+        return codec.frombytes(payload)
+    raise ValueError(f"Unsupported encoding {condition.encoding!r}")
 
 
 def build_prompt(context: str, needle_key: str, encoding: EncodingName) -> str:
@@ -166,7 +174,7 @@ def generate_sample(
     seed = sample_seed(config, sample_index)
     payload = make_payload(seed, config.payload_bytes)
     rng = Random(seed + 1_000_000)
-    codec = IdTokenBiMap(condition.vocab)
+    codec = codec_for_condition(condition)
     needle_key = f"needle_{sample_index:04d}"
     if condition.encoding == "numeric_index":
         _, needle_value, distractor_values = _make_numeric_index_assignments(
@@ -231,7 +239,7 @@ def estimate_hex_baseline_record_count(
     payload = make_payload(seed, config.payload_bytes)
     rng = Random(seed + 1_000_000)
     condition = EncodingCondition(encoding="raw_hex", vocab="o200k")
-    codec = IdTokenBiMap(condition.vocab)
+    codec = codec_for_condition(condition)
     needle_key = f"needle_{sample_index:04d}"
     needle_value = render_identifier(payload, condition, codec)
     needle_line = _format_record(needle_key, needle_value)

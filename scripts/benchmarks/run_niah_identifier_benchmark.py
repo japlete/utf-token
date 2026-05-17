@@ -21,6 +21,7 @@ from scripts.benchmarks.niah_dataset import (
     NiahSample,
     VocabName,
     build_prompt,
+    codec_for_condition,
     estimate_hex_baseline_record_count,
     generate_sample,
     make_payload,
@@ -513,7 +514,7 @@ def _estimate_hex_chars_per_token() -> float:
 
 
 def _codec_for(condition: EncodingCondition) -> IdTokenBiMap:
-    return IdTokenBiMap(condition.vocab)
+    return codec_for_condition(condition)
 
 
 if __name__ == "__main__":

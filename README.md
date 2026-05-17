@@ -46,8 +46,6 @@ The internal map in `IdTokenBiMap` can be saved and restored to transfer offline
 - `to_dict` / `from_dict`
 - `to_json` / `from_json`
 
-`from_dict` accepts `null`, a positive integer, or the string `"all"` for each `keep_bytes` value. The canonical export always uses `null` for full-input encodings.
-
 ## Optional arguments
 
 ### LLM - token vocabulary pairing
@@ -63,21 +61,21 @@ bimap = IdTokenBiMap(vocab="gemma4")
 
 ### Controlling how many bytes are encoded with `keep_bytes`
 
-Each forward method takes a `keep_bytes` keyword:
+`IdTokenBiMap` takes `keep_bytes` at construction (default **3**):
 
-- omitted (default): encode the first **3** bytes of the input
-- a positive integer: encode that many leading bytes
+- a positive integer: encode that many leading bytes (you get 1 token per 15 bits)
 - `None` or `"all"`: encode the full input
 
 ```python
-short = bimap.frombytes(b"\x01\x02\x03\x04\x05\x06")            # encodes first 3 bytes
-longer = bimap.frombytes(b"\x01\x02\x03\x04\x05\x06", keep_bytes=4)
-full = bimap.frombytes(b"\x01\x02\x03\x04\x05\x06", keep_bytes="all")
+short_bimap = IdTokenBiMap()                                     # keep_bytes=3
+longer_bimap = IdTokenBiMap(keep_bytes=4)
+full_bimap = IdTokenBiMap(keep_bytes="all")
 
-bimap.tobytes(short) == b"\x01\x02\x03\x04\x05\x06"             # reverse returns the full input
+short = short_bimap.frombytes(b"\x01\x02\x03\x04\x05\x06")
+short_bimap.tobytes(short) == b"\x01\x02\x03\x04\x05\x06"        # reverse returns the full input
 ```
 
-Three bytes is enough entropy for retrieval workloads where you only need a handful of distinct identifiers visible to the model at once, and is also the minimum we recommend for the healing logic described below to stay reliable. Pass a larger value if you need more in-context disambiguation.
+Three bytes is enough entropy for retrieval workloads where you only need a handful of distinct identifiers visible to the model at once, and is also the minimum we recommend for the healing logic described below to stay reliable. Use a larger value if you need more in-context disambiguation.
 
 ### Healing transcription errors on reverse lookup
 

@@ -3,9 +3,8 @@ from __future__ import annotations
 import base64
 import json
 from collections.abc import Iterable, Iterator
-from dataclasses import dataclass
 from threading import RLock
-from typing import Literal, TypeAlias, cast, overload
+from typing import Literal, TypeAlias, overload
 from uuid import UUID
 
 import Levenshtein
@@ -23,9 +22,8 @@ from ._api import (
 )
 from ._tables import DEFAULT_VOCAB, VocabName
 
-FORMAT_VERSION = 3
+FORMAT_VERSION = 4
 DEFAULT_KEEP_BYTES = 3
-ForwardMapKey: TypeAlias = tuple[bytes, int | None]
 ErrorMode: TypeAlias = Literal["fix", "raise"]
 DEFAULT_ERROR_MODE: ErrorMode = "fix"
 
@@ -48,28 +46,38 @@ def _validate_vocab_name(value: str) -> VocabName:
     raise ValueError(f"Unsupported vocab {value!r}")
 
 
+def _parse_payload_keep_bytes(value: object) -> KeepBytesValue:
+    if value is None or value == "all":
+        return None if value is None else "all"
+    if isinstance(value, int):
+        return value
+    raise ValueError(
+        "Mapping payload keep_bytes must be null, a positive integer, or 'all'"
+    )
+
+
 def _increment_bytes(data: bytes) -> bytes:
     next_value = int.from_bytes(data, byteorder="big", signed=False) + 1
     width = max(len(data), (next_value.bit_length() + 7) // 8, 1)
     return next_value.to_bytes(width, byteorder="big", signed=False)
 
 
-@dataclass(slots=True)
-class StoredMapping:
-    original_bytes: bytes
-    encodings: set[int | None]
-
-
-def _encoding_sort_key(value: int | None) -> int:
-    return -1 if value is None else value
-
-
 class IdTokenBiMap:
-    def __init__(self, vocab: VocabName = DEFAULT_VOCAB) -> None:
+    def __init__(
+        self,
+        vocab: VocabName = DEFAULT_VOCAB,
+        *,
+        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
+    ) -> None:
         self._vocab = vocab
-        self._reverse_map: dict[str, StoredMapping] = {}
-        self._forward_map: dict[ForwardMapKey, str] = {}
+        self._keep_bytes: int | None = _validate_keep_bytes(keep_bytes)
+        self._reverse_map: dict[str, bytes] = {}
+        self._forward_map: dict[bytes, str] = {}
         self._lock = RLock()
+
+    @property
+    def keep_bytes(self) -> int | None:
+        return self._keep_bytes
 
     def __contains__(self, item: object) -> bool:
         if not isinstance(item, str):
@@ -77,49 +85,30 @@ class IdTokenBiMap:
         with self._lock:
             return item in self._reverse_map
 
-    def _store_mapping(
-        self,
-        encoded: str,
-        original_bytes: bytes,
-        keep_bytes: int | None,
-    ) -> str:
-        mapping = self._reverse_map.get(encoded)
-        if mapping is None:
-            self._reverse_map[encoded] = StoredMapping(
-                original_bytes=original_bytes,
-                encodings={keep_bytes},
-            )
-        else:
-            mapping.encodings.add(keep_bytes)
-        self._forward_map[(original_bytes, keep_bytes)] = encoded
+    def _store_mapping(self, encoded: str, original_bytes: bytes) -> str:
+        self._reverse_map[encoded] = original_bytes
+        self._forward_map[original_bytes] = encoded
         return encoded
 
-    def _encode_and_store_single(
-        self,
-        data: bytes,
-        *,
-        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
-    ) -> str:
-        normalized = _validate_keep_bytes(keep_bytes)
-        key = (data, normalized)
+    def _encode_and_store_single(self, data: bytes) -> str:
         with self._lock:
-            cached = self._forward_map.get(key)
+            cached = self._forward_map.get(data)
             if cached is not None:
                 return cached
 
-            working_bytes = _truncate_input(data, keep_bytes=normalized)
+            working_bytes = _truncate_input(data, keep_bytes=self._keep_bytes)
             encoded = _encode_bytes_single(working_bytes, vocab=self._vocab)
-            mapping = self._reverse_map.get(encoded)
-            if mapping is None or mapping.original_bytes == data:
-                return self._store_mapping(encoded, data, normalized)
+            existing = self._reverse_map.get(encoded)
+            if existing is None or existing == data:
+                return self._store_mapping(encoded, data)
 
             candidate = working_bytes
             while True:
                 candidate = _increment_bytes(candidate)
                 encoded = _encode_bytes_single(candidate, vocab=self._vocab)
-                mapping = self._reverse_map.get(encoded)
-                if mapping is None or mapping.original_bytes == data:
-                    return self._store_mapping(encoded, data, normalized)
+                existing = self._reverse_map.get(encoded)
+                if existing is None or existing == data:
+                    return self._store_mapping(encoded, data)
 
     def _find_nearest_encoded(self, data: str) -> str | None:
         """Return the stored encoded identifier closest to `data`, or None if empty.
@@ -144,15 +133,15 @@ class IdTokenBiMap:
 
     def _lookup_bytes_single(self, data: str, errors: ErrorMode) -> bytes | None:
         with self._lock:
-            mapping = self._reverse_map.get(data)
-            if mapping is not None:
-                return mapping.original_bytes
+            original = self._reverse_map.get(data)
+            if original is not None:
+                return original
             if errors == "raise":
                 raise KeyError(data)
             nearest = self._find_nearest_encoded(data)
             if nearest is None:
                 return None
-            return self._reverse_map[nearest].original_bytes
+            return self._reverse_map[nearest]
 
     def _lookup_hex_single(self, data: str, errors: ErrorMode) -> str | None:
         value = self._lookup_bytes_single(data, errors)
@@ -179,22 +168,13 @@ class IdTokenBiMap:
 
     def to_dict(self) -> dict[str, object]:
         with self._lock:
-            mappings: dict[str, object] = {}
+            mappings: dict[str, str] = {}
             for encoded in sorted(self._reverse_map):
-                mapping = self._reverse_map[encoded]
-                mappings[encoded] = {
-                    "original_hex": mapping.original_bytes.hex(),
-                    "encodings": [
-                        {"keep_bytes": keep_bytes}
-                        for keep_bytes in sorted(
-                            mapping.encodings,
-                            key=_encoding_sort_key,
-                        )
-                    ],
-                }
+                mappings[encoded] = self._reverse_map[encoded].hex()
             return {
                 "format_version": FORMAT_VERSION,
                 "vocab": self._vocab,
+                "keep_bytes": self._keep_bytes,
                 "mappings": mappings,
             }
 
@@ -215,65 +195,39 @@ class IdTokenBiMap:
             raise ValueError("Mapping payload must contain a 'vocab' string")
         vocab = _validate_vocab_name(vocab_obj)
 
+        if "keep_bytes" not in payload:
+            raise ValueError("Mapping payload must contain 'keep_bytes'")
+        keep_bytes_raw = _parse_payload_keep_bytes(payload.get("keep_bytes"))
+
         mappings_obj = payload.get("mappings")
         if not isinstance(mappings_obj, dict):
             raise ValueError("Mapping payload must contain a 'mappings' object")
 
-        instance = cls(vocab)
+        instance = cls(vocab, keep_bytes=keep_bytes_raw)
 
         for encoded, entry in mappings_obj.items():
             if not isinstance(encoded, str):
                 raise ValueError("Mapping keys must be encoded strings")
-            if not isinstance(entry, dict):
-                raise ValueError(f"Mapping entry for {encoded!r} must be an object")
-            entry_dict = cast(dict[str, object], entry)
+            if not isinstance(entry, str):
+                raise ValueError(
+                    f"Mapping entry for {encoded!r} must be an original_hex string"
+                )
 
-            original_hex = entry_dict.get("original_hex")
-            if not isinstance(original_hex, str):
-                raise ValueError(f"Mapping entry for {encoded!r} is missing 'original_hex'")
+            original_bytes = _decode_hex_bytes(entry)
+            existing_reverse = instance._reverse_map.get(encoded)
+            if existing_reverse is not None and existing_reverse != original_bytes:
+                raise ValueError(
+                    f"Conflicting mapping import for encoded {encoded!r}"
+                )
+            existing_forward = instance._forward_map.get(original_bytes)
+            if existing_forward is not None and existing_forward != encoded:
+                raise ValueError(
+                    "Conflicting mapping import for "
+                    f"{entry!r}"
+                )
 
-            encodings_obj = entry_dict.get("encodings")
-            if not isinstance(encodings_obj, list):
-                raise ValueError(f"Mapping entry for {encoded!r} is missing 'encodings'")
-
-            original_bytes = _decode_hex_bytes(original_hex)
-            encodings: set[int | None] = set()
-            for item in encodings_obj:
-                if not isinstance(item, dict):
-                    raise ValueError(f"Mapping entry for {encoded!r} has a non-object encoding")
-                encoding_dict = cast(dict[str, object], item)
-
-                if "keep_bytes" not in encoding_dict:
-                    raise ValueError(
-                        f"Mapping entry for {encoded!r} is missing encoding keep_bytes"
-                    )
-                truncate_obj = encoding_dict.get("keep_bytes")
-                if truncate_obj is None or truncate_obj == "all":
-                    encodings.add(None)
-                elif isinstance(truncate_obj, int):
-                    encodings.add(_validate_keep_bytes(truncate_obj))
-                else:
-                    raise ValueError(
-                        f"Mapping entry for {encoded!r} has an invalid keep_bytes; "
-                        "expected null, a positive integer, or 'all'"
-                    )
-
-            if not encodings:
-                raise ValueError(f"Mapping entry for {encoded!r} must list at least one encoding")
-
-            instance._reverse_map[encoded] = StoredMapping(
-                original_bytes=original_bytes,
-                encodings=set(encodings),
-            )
-            for keep_bytes in encodings:
-                key = (original_bytes, keep_bytes)
-                existing = instance._forward_map.get(key)
-                if existing is not None and existing != encoded:
-                    raise ValueError(
-                        "Conflicting mapping import for "
-                        f"{original_hex!r} with keep_bytes={keep_bytes!r}"
-                    )
-                instance._forward_map[key] = encoded
+            instance._reverse_map[encoded] = original_bytes
+            instance._forward_map[original_bytes] = encoded
 
         return instance
 
@@ -285,172 +239,65 @@ class IdTokenBiMap:
         return cls.from_dict(parsed)
 
     @overload
-    def frombytes(
-        self,
-        data: bytes,
-        /,
-        *,
-        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
-    ) -> str: ...
+    def frombytes(self, data: bytes, /) -> str: ...
 
     @overload
-    def frombytes(
-        self,
-        data: Iterable[bytes],
-        /,
-        *,
-        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
-    ) -> Iterator[str]: ...
+    def frombytes(self, data: Iterable[bytes], /) -> Iterator[str]: ...
 
-    def frombytes(
-        self,
-        data: bytes | Iterable[bytes],
-        /,
-        *,
-        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
-    ) -> str | Iterator[str]:
+    def frombytes(self, data: bytes | Iterable[bytes], /) -> str | Iterator[str]:
         """Encode raw bytes and store the original for later reverse lookup.
 
-        ``keep_bytes`` defaults to ``3``: only the first three bytes of each
-        input are passed to the encoder. Pass a different positive integer to
-        keep more or fewer leading bytes, or pass ``None`` / ``"all"`` to
-        encode the full input. Reverse lookups always return the full original
-        bytes regardless of how many bytes were encoded.
+        Truncation is controlled by the instance ``keep_bytes`` set at
+        construction. Reverse lookups always return the full original bytes
+        regardless of how many bytes were encoded.
         """
         if isinstance(data, bytes):
-            return self._encode_and_store_single(data, keep_bytes=keep_bytes)
-        return (
-            self._encode_and_store_single(item, keep_bytes=keep_bytes)
-            for item in data
-        )
+            return self._encode_and_store_single(data)
+        return (self._encode_and_store_single(item) for item in data)
 
     @overload
-    def fromhex(
-        self,
-        data: str,
-        /,
-        *,
-        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
-    ) -> str: ...
+    def fromhex(self, data: str, /) -> str: ...
 
     @overload
-    def fromhex(
-        self,
-        data: Iterable[str],
-        /,
-        *,
-        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
-    ) -> Iterator[str]: ...
+    def fromhex(self, data: Iterable[str], /) -> Iterator[str]: ...
 
-    def fromhex(
-        self,
-        data: str | Iterable[str],
-        /,
-        *,
-        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
-    ) -> str | Iterator[str]:
-        """Encode hex-decoded bytes and store the original for reverse lookup.
-
-        See :meth:`frombytes` for the ``keep_bytes`` contract; the default is
-        ``3``.
-        """
+    def fromhex(self, data: str | Iterable[str], /) -> str | Iterator[str]:
+        """Encode hex-decoded bytes and store the original for reverse lookup."""
         if isinstance(data, str):
-            return self._encode_and_store_single(
-                _decode_hex_bytes(data),
-                keep_bytes=keep_bytes,
-            )
+            return self._encode_and_store_single(_decode_hex_bytes(data))
         return (
-            self._encode_and_store_single(
-                _decode_hex_bytes(item),
-                keep_bytes=keep_bytes,
-            )
-            for item in data
+            self._encode_and_store_single(_decode_hex_bytes(item)) for item in data
         )
 
     @overload
-    def frombase64(
-        self,
-        data: Base64Value,
-        /,
-        *,
-        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
-    ) -> str: ...
+    def frombase64(self, data: Base64Value, /) -> str: ...
 
     @overload
-    def frombase64(
-        self,
-        data: Iterable[Base64Value],
-        /,
-        *,
-        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
-    ) -> Iterator[str]: ...
+    def frombase64(self, data: Iterable[Base64Value], /) -> Iterator[str]: ...
 
     def frombase64(
-        self,
-        data: Base64Value | Iterable[Base64Value],
-        /,
-        *,
-        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
+        self, data: Base64Value | Iterable[Base64Value], /
     ) -> str | Iterator[str]:
-        """Encode base64-decoded bytes and store the original for reverse lookup.
-
-        See :meth:`frombytes` for the ``keep_bytes`` contract; the default is
-        ``3``.
-        """
+        """Encode base64-decoded bytes and store the original for reverse lookup."""
         if isinstance(data, (str, bytes)):
-            return self._encode_and_store_single(
-                _decode_base64_bytes(data),
-                keep_bytes=keep_bytes,
-            )
+            return self._encode_and_store_single(_decode_base64_bytes(data))
         return (
-            self._encode_and_store_single(
-                _decode_base64_bytes(item),
-                keep_bytes=keep_bytes,
-            )
+            self._encode_and_store_single(_decode_base64_bytes(item))
             for item in data
         )
 
     @overload
-    def fromuuid(
-        self,
-        data: UUIDValue,
-        /,
-        *,
-        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
-    ) -> str: ...
+    def fromuuid(self, data: UUIDValue, /) -> str: ...
 
     @overload
-    def fromuuid(
-        self,
-        data: Iterable[UUIDValue],
-        /,
-        *,
-        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
-    ) -> Iterator[str]: ...
+    def fromuuid(self, data: Iterable[UUIDValue], /) -> Iterator[str]: ...
 
-    def fromuuid(
-        self,
-        data: UUIDValue | Iterable[UUIDValue],
-        /,
-        *,
-        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
-    ) -> str | Iterator[str]:
-        """Encode UUID payloads and store the original for reverse lookup.
-
-        See :meth:`frombytes` for the ``keep_bytes`` contract; the default is
-        ``3``.
-        """
+    def fromuuid(self, data: UUIDValue | Iterable[UUIDValue], /) -> str | Iterator[str]:
+        """Encode UUID payloads and store the original for reverse lookup."""
         if isinstance(data, (UUID, str)):
-            return self._encode_and_store_single(
-                _decode_uuid_bytes(data),
-                keep_bytes=keep_bytes,
-            )
+            return self._encode_and_store_single(_decode_uuid_bytes(data))
         return (
-            self._encode_and_store_single(
-                _decode_uuid_bytes(item),
-                keep_bytes=keep_bytes,
-            )
-            for item in data
+            self._encode_and_store_single(_decode_uuid_bytes(item)) for item in data
         )
 
     @overload

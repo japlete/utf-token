@@ -15,6 +15,7 @@ from scripts.benchmarks.niah_dataset import (
     EncodingCondition,
     EncodingName,
     VocabName,
+    codec_for_condition,
     estimate_hex_baseline_record_count,
     generate_sample,
     make_payload,
@@ -98,23 +99,20 @@ class NiahIdentifierBenchmarkTests(unittest.TestCase):
             EncodingCondition(encoding="raw_uuid", vocab="o200k"),
             IdTokenBiMap("o200k"),
         )
-        codec = IdTokenBiMap("gemma4")
-        utf_token_text = render_identifier(
-            payload,
-            EncodingCondition(encoding="utf_token", vocab="gemma4"),
-            codec,
-        )
+        utf_token_condition = EncodingCondition(encoding="utf_token", vocab="gemma4")
+        keep_3_condition = EncodingCondition(encoding="utf_token_keep_3", vocab="gemma4")
+        utf_token_codec = codec_for_condition(utf_token_condition)
+        keep_3_codec = codec_for_condition(keep_3_condition)
+        utf_token_text = render_identifier(payload, utf_token_condition, utf_token_codec)
         truncated_utf_token_text = render_identifier(
-            payload,
-            EncodingCondition(encoding="utf_token_keep_3", vocab="gemma4"),
-            codec,
+            payload, keep_3_condition, keep_3_codec
         )
 
         self.assertEqual(bytes.fromhex(hex_text), payload)
         self.assertEqual(base64.b64decode(base64_text, validate=True), payload)
         self.assertEqual(UUID(uuid_text).bytes, payload)
-        self.assertEqual(codec.tobytes(utf_token_text), payload)
-        self.assertEqual(codec.tobytes(truncated_utf_token_text), payload)
+        self.assertEqual(utf_token_codec.tobytes(utf_token_text), payload)
+        self.assertEqual(keep_3_codec.tobytes(truncated_utf_token_text), payload)
         self.assertNotEqual(truncated_utf_token_text, utf_token_text)
 
     def test_fixed_record_count_keeps_same_number_of_rows(self) -> None:

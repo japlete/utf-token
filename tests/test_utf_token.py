@@ -7,7 +7,7 @@ from typing import Any, cast
 from uuid import UUID
 
 from utf_token import IdTokenBiMap, frombase64, frombytes, fromhex, fromuuid
-from utf_token._reversible import FORMAT_VERSION, StoredMapping
+from utf_token._reversible import FORMAT_VERSION
 from utf_token._tables import (
     DEFAULT_VOCAB,
     VocabName,
@@ -357,18 +357,18 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(frombytes(raw), _o200k_encode(raw))
 
     def test_truncated_encoding_reverses_to_full_original(self) -> None:
-        codec = IdTokenBiMap()
-        encoded = codec.frombytes(b"\x12\x34\xab", keep_bytes=2)
+        codec = IdTokenBiMap(keep_bytes=2)
+        encoded = codec.frombytes(b"\x12\x34\xab")
         self.assertEqual(encoded, _o200k_encode(b"\x12\x34"))
         self.assertEqual(codec.tobytes(encoded), b"\x12\x34\xab")
         self.assertEqual(codec.tohex(encoded), "1234ab")
 
     def test_keep_bytes_all_equivalent_to_none(self) -> None:
         raw = b"\x12\x34\xab\xcd\xef"
-        codec_none = IdTokenBiMap()
-        codec_all = IdTokenBiMap()
-        encoded_none = codec_none.frombytes(raw, keep_bytes=None)
-        encoded_all = codec_all.frombytes(raw, keep_bytes="all")
+        codec_none = IdTokenBiMap(keep_bytes=None)
+        codec_all = IdTokenBiMap(keep_bytes="all")
+        encoded_none = codec_none.frombytes(raw)
+        encoded_all = codec_all.frombytes(raw)
         self.assertEqual(encoded_none, encoded_all)
         self.assertEqual(encoded_none, _o200k_encode(raw))
 
@@ -378,10 +378,11 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(standalone_none, _o200k_encode(raw))
 
     def test_keep_bytes_all_normalizes_iterables(self) -> None:
-        codec = IdTokenBiMap()
         raw = b"\x12\x34\xab\xcd\xef"
-        iter_none = list(codec.frombytes(iter([raw]), keep_bytes=None))
-        iter_all = list(codec.frombytes(iter([raw]), keep_bytes="all"))
+        codec_none = IdTokenBiMap(keep_bytes=None)
+        codec_all = IdTokenBiMap(keep_bytes="all")
+        iter_none = list(codec_none.frombytes(iter([raw])))
+        iter_all = list(codec_all.frombytes(iter([raw])))
         self.assertEqual(iter_none, iter_all)
 
         standalone_none = list(frombytes(iter([raw]), keep_bytes=None))
@@ -389,21 +390,9 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(standalone_none, standalone_all)
         self.assertEqual(standalone_none, [_o200k_encode(raw)])
 
-    def test_keep_bytes_all_shares_forward_map_with_none(self) -> None:
-        codec = IdTokenBiMap()
-        raw = b"\x12\x34\xab\xcd\xef"
-        encoded_all = codec.frombytes(raw, keep_bytes="all")
-        encoded_none = codec.frombytes(raw, keep_bytes=None)
-        self.assertEqual(encoded_all, encoded_none)
-        payload = codec.to_dict()
-        mappings = cast(dict[str, object], payload["mappings"])
-        entry = cast(dict[str, object], mappings[encoded_all])
-        self.assertEqual(entry["encodings"], [{"keep_bytes": None}])
-
     def test_invalid_keep_bytes_string_raises_value_error(self) -> None:
-        codec = IdTokenBiMap()
         with self.assertRaises(ValueError):
-            codec.frombytes(b"\x00\x01", keep_bytes=cast(Any, "bogus"))
+            IdTokenBiMap(keep_bytes=cast(Any, "bogus"))
         with self.assertRaises(ValueError):
             frombytes(b"\x00\x01", keep_bytes=cast(Any, "bogus"))
 
@@ -421,9 +410,9 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(codec.touuid(uuid_encoded), zero_uuid)
 
     def test_round_trips_under_gemma4_vocab(self) -> None:
-        codec = IdTokenBiMap("gemma4")
+        codec = IdTokenBiMap("gemma4", keep_bytes=None)
         raw = b"\x12\x34\xab"
-        encoded = codec.frombytes(raw, keep_bytes=None)
+        encoded = codec.frombytes(raw)
         self.assertEqual(encoded, _gemma4_encode(raw))
         self.assertEqual(codec.tobytes(encoded), raw)
 
@@ -465,11 +454,8 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(codec.tobytes(second), b"\x00\x02")
 
     def test_heal_substitution(self) -> None:
-        codec = IdTokenBiMap("gemma4")
-        target = codec.frombytes(
-            bytes.fromhex("3596e50a4202255eeeb0f5964097f49a"),
-            keep_bytes=None,
-        )
+        codec = IdTokenBiMap("gemma4", keep_bytes=None)
+        target = codec.frombytes(bytes.fromhex("3596e50a4202255eeeb0f5964097f49a"))
         if not target:
             self.skipTest("encoded target unexpectedly empty")
         garbled = target[:-1] + ("Z" if target[-1] != "Z" else "Y")
@@ -477,11 +463,8 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(codec.tobytes(garbled), codec.tobytes(target))
 
     def test_heal_deletion(self) -> None:
-        codec = IdTokenBiMap("gemma4")
-        target = codec.frombytes(
-            bytes.fromhex("3596e50a4202255eeeb0f5964097f49a"),
-            keep_bytes=None,
-        )
+        codec = IdTokenBiMap("gemma4", keep_bytes=None)
+        target = codec.frombytes(bytes.fromhex("3596e50a4202255eeeb0f5964097f49a"))
         if len(target) < 2:
             self.skipTest("encoded target too short to delete a character")
         garbled = target[:-1]
@@ -489,11 +472,8 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(codec.tobytes(garbled), codec.tobytes(target))
 
     def test_heal_insertion_of_non_ascii(self) -> None:
-        codec = IdTokenBiMap("gemma4")
-        target = codec.frombytes(
-            bytes.fromhex("3596e50a4202255eeeb0f5964097f49a"),
-            keep_bytes=None,
-        )
+        codec = IdTokenBiMap("gemma4", keep_bytes=None)
+        target = codec.frombytes(bytes.fromhex("3596e50a4202255eeeb0f5964097f49a"))
         if len(target) < 4:
             self.skipTest("encoded target too short for insertion test")
         midpoint = len(target) // 2
@@ -502,11 +482,8 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(codec.tobytes(garbled), codec.tobytes(target))
 
     def test_heal_whitespace_insertion(self) -> None:
-        codec = IdTokenBiMap("gemma4")
-        target = codec.frombytes(
-            bytes.fromhex("3596e50a4202255eeeb0f5964097f49a"),
-            keep_bytes=None,
-        )
+        codec = IdTokenBiMap("gemma4", keep_bytes=None)
+        target = codec.frombytes(bytes.fromhex("3596e50a4202255eeeb0f5964097f49a"))
         if len(target) < 4:
             self.skipTest("encoded target too short for whitespace test")
         midpoint = len(target) // 2
@@ -515,15 +492,9 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(codec.tobytes(garbled), codec.tobytes(target))
 
     def test_heal_picks_nearest_among_distinct_identifiers(self) -> None:
-        codec = IdTokenBiMap("gemma4")
-        first = codec.frombytes(
-            bytes.fromhex("3596e50a4202255eeeb0f5964097f49a"),
-            keep_bytes=None,
-        )
-        second = codec.frombytes(
-            bytes.fromhex("7a80ac94a5e07832ff53aa34473402bd"),
-            keep_bytes=None,
-        )
+        codec = IdTokenBiMap("gemma4", keep_bytes=None)
+        first = codec.frombytes(bytes.fromhex("3596e50a4202255eeeb0f5964097f49a"))
+        second = codec.frombytes(bytes.fromhex("7a80ac94a5e07832ff53aa34473402bd"))
         garbled_first = first[:-1] + ("Z" if first[-1] != "Z" else "Y")
         self.assertNotIn(garbled_first, codec)
         self.assertEqual(codec.tobytes(garbled_first), codec.tobytes(first))
@@ -531,14 +502,8 @@ class IdTokenBiMapTests(unittest.TestCase):
 
     def test_heal_tie_break_is_deterministic(self) -> None:
         codec = IdTokenBiMap()
-        codec._reverse_map["bar"] = StoredMapping(
-            original_bytes=b"\x02",
-            encodings={None},
-        )
-        codec._reverse_map["baz"] = StoredMapping(
-            original_bytes=b"\x03",
-            encodings={None},
-        )
+        codec._reverse_map["bar"] = b"\x02"
+        codec._reverse_map["baz"] = b"\x03"
         # Edit distance from "ba_" to "bar" is 1, same as to "baz".
         # The smaller string in lexicographic order ("bar") wins.
         self.assertEqual(codec.tobytes("ba_"), b"\x02")
@@ -600,23 +565,16 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(codec.tobytes(first), b"\x00\x01\x27")
 
     def test_reuses_same_output_for_repeated_truncation_setting(self) -> None:
-        codec = IdTokenBiMap()
-        first = codec.frombytes(b"\x12\x34\xab", keep_bytes=2)
-        second = codec.frombytes(b"\x12\x34\xab", keep_bytes=2)
+        codec = IdTokenBiMap(keep_bytes=2)
+        first = codec.frombytes(b"\x12\x34\xab")
+        second = codec.frombytes(b"\x12\x34\xab")
         self.assertEqual(first, second)
 
-    def test_same_original_supports_multiple_truncation_lengths(self) -> None:
-        codec = IdTokenBiMap()
+    def test_different_keep_bytes_instances_encode_differently(self) -> None:
         raw = b"\x12\x34\xab"
-
-        full = codec.frombytes(raw)
-        truncated = codec.frombytes(raw, keep_bytes=2)
-        oversized = codec.frombytes(raw, keep_bytes=10)
-
-        self.assertNotEqual(full, truncated)
-        self.assertEqual(full, oversized)
-        self.assertEqual(codec.tobytes(full), raw)
-        self.assertEqual(codec.tobytes(truncated), raw)
+        truncated = IdTokenBiMap(keep_bytes=2).frombytes(raw)
+        default = IdTokenBiMap().frombytes(raw)
+        self.assertNotEqual(truncated, default)
 
     def test_remaps_known_collision(self) -> None:
         # The 15-bit bitstream encoder still admits natural collisions: two
@@ -631,18 +589,15 @@ class IdTokenBiMapTests(unittest.TestCase):
                 stage1_second = frombytes(second_input, vocab=vocab)
                 self.assertEqual(stage1_first, stage1_second)
 
-                codec = IdTokenBiMap(vocab)
-                first = codec.frombytes(first_input, keep_bytes=None)
-                second = codec.frombytes(second_input, keep_bytes=None)
+                codec = IdTokenBiMap(vocab, keep_bytes=None)
+                first = codec.frombytes(first_input)
+                second = codec.frombytes(second_input)
 
                 self.assertEqual(first, stage1_first)
                 self.assertNotEqual(second, stage1_second)
                 self.assertEqual(codec.tobytes(first), first_input)
                 self.assertEqual(codec.tobytes(second), second_input)
-                self.assertEqual(
-                    codec.frombytes(second_input, keep_bytes=None),
-                    second,
-                )
+                self.assertEqual(codec.frombytes(second_input), second)
 
     @staticmethod
     def _find_natural_collision(vocab: VocabName) -> tuple[bytes, bytes]:
@@ -668,12 +623,12 @@ class IdTokenBiMapTests(unittest.TestCase):
         vocabs: tuple[VocabName, ...] = ("o200k", "gemma4")
         for vocab in vocabs:
             with self.subTest(vocab=vocab):
-                codec = IdTokenBiMap(vocab)
+                codec = IdTokenBiMap(vocab, keep_bytes=2)
                 first_raw = bytes.fromhex("123400")
                 second_raw = bytes.fromhex("1234ff")
 
-                first = codec.frombytes(first_raw, keep_bytes=2)
-                second = codec.frombytes(second_raw, keep_bytes=2)
+                first = codec.frombytes(first_raw)
+                second = codec.frombytes(second_raw)
 
                 self.assertEqual(first, frombytes(b"\x12\x34", vocab=vocab))
                 self.assertNotEqual(first, second)
@@ -688,42 +643,25 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(codec.tobytes(encoded), raw)
 
     def test_dict_and_json_round_trip(self) -> None:
-        codec = IdTokenBiMap()
-        raw = b"\x00\x01"
-        encoded = codec.frombytes(raw, keep_bytes=None)
-        oversized = codec.frombytes(raw, keep_bytes=5)
-        truncated = codec.frombytes(raw, keep_bytes=1)
-
-        self.assertEqual(encoded, oversized)
+        codec = IdTokenBiMap(keep_bytes=3)
+        raw = b"\x00\x01\xab\xcd"
+        encoded = codec.frombytes(raw)
 
         payload = codec.to_dict()
         self.assertEqual(payload["format_version"], FORMAT_VERSION)
         self.assertEqual(payload["vocab"], "o200k")
-        mappings = cast(dict[str, object], payload["mappings"])
-        shared_entry = cast(dict[str, object], mappings[encoded])
-        self.assertEqual(
-            shared_entry["encodings"],
-            [
-                {"keep_bytes": None},
-                {"keep_bytes": 5},
-            ],
-        )
-        truncated_entry = cast(dict[str, object], mappings[truncated])
-        self.assertEqual(
-            truncated_entry["encodings"],
-            [{"keep_bytes": 1}],
-        )
+        self.assertEqual(payload["keep_bytes"], 3)
+        mappings = cast(dict[str, str], payload["mappings"])
+        self.assertEqual(mappings[encoded], raw.hex())
 
         clone = IdTokenBiMap.from_dict(payload)
+        self.assertEqual(clone.keep_bytes, 3)
         self.assertEqual(clone.tobytes(encoded), raw)
-        self.assertEqual(clone.tobytes(truncated), raw)
-        self.assertEqual(clone.frombytes(raw, keep_bytes=None), encoded)
-        self.assertEqual(clone.frombytes(raw, keep_bytes=5), oversized)
-        self.assertEqual(clone.frombytes(raw, keep_bytes=1), truncated)
+        self.assertEqual(clone.frombytes(raw), encoded)
 
         json_clone = IdTokenBiMap.from_json(codec.to_json(indent=2))
         self.assertEqual(json_clone.tobytes(encoded), raw)
-        self.assertEqual(json_clone.tobytes(truncated), raw)
+        self.assertEqual(json_clone.frombytes(raw), encoded)
 
     def test_from_dict_accepts_all_string_as_full_input(self) -> None:
         raw = b"\x12\x34\xab\xcd"
@@ -731,27 +669,15 @@ class IdTokenBiMapTests(unittest.TestCase):
         payload: dict[str, object] = {
             "format_version": FORMAT_VERSION,
             "vocab": "o200k",
-            "mappings": {
-                full_encoded: {
-                    "original_hex": raw.hex(),
-                    "encodings": [{"keep_bytes": "all"}],
-                },
-            },
+            "keep_bytes": "all",
+            "mappings": {full_encoded: raw.hex()},
         }
         clone = IdTokenBiMap.from_dict(payload)
+        self.assertIsNone(clone.keep_bytes)
         self.assertEqual(clone.tobytes(full_encoded), raw)
         roundtrip = clone.to_dict()
-        roundtrip_mappings = cast(dict[str, object], roundtrip["mappings"])
-        entry = cast(dict[str, object], roundtrip_mappings[full_encoded])
-        self.assertEqual(entry["encodings"], [{"keep_bytes": None}])
-        self.assertEqual(
-            clone.frombytes(raw, keep_bytes="all"),
-            full_encoded,
-        )
-        self.assertEqual(
-            clone.frombytes(raw, keep_bytes=None),
-            full_encoded,
-        )
+        self.assertIsNone(roundtrip["keep_bytes"])
+        self.assertEqual(clone.frombytes(raw), full_encoded)
 
     def test_import_rejects_conflicting_forward_mapping(self) -> None:
         with self.assertRaises(ValueError):
@@ -759,15 +685,10 @@ class IdTokenBiMapTests(unittest.TestCase):
                 {
                     "format_version": FORMAT_VERSION,
                     "vocab": "o200k",
+                    "keep_bytes": None,
                     "mappings": {
-                        "first": {
-                            "original_hex": "0001",
-                            "encodings": [{"keep_bytes": None}],
-                        },
-                        "second": {
-                            "original_hex": "0001",
-                            "encodings": [{"keep_bytes": None}],
-                        },
+                        "first": "0001",
+                        "second": "0001",
                     },
                 }
             )
@@ -788,9 +709,8 @@ class IdTokenBiMapTests(unittest.TestCase):
             codec.touuid(encoded)
 
     def test_invalid_keep_bytes_raises_value_error(self) -> None:
-        codec = IdTokenBiMap()
         with self.assertRaises(ValueError):
-            codec.frombytes(b"\x00\x01", keep_bytes=0)
+            IdTokenBiMap(keep_bytes=0)
 
     def test_thread_safe_per_instance(self) -> None:
         codec = IdTokenBiMap()

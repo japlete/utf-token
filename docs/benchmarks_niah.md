@@ -2,7 +2,7 @@
 
 This benchmark checks whether `utf-token`-encoded random identifiers hurt long-context
 retrieval accuracy. The default run compares full-input `utf-token` identifiers
-(`keep_bytes="all"`) with the library's default `keep_bytes=3` encoding; raw `hex`,
+(`IdTokenBiMap(keep_bytes=None)`) with the library's default `keep_bytes=3` encoding; raw `hex`,
 `base64`, and `uuid` baselines are available with `--all-encodings`.
 
 It is inspired by Needle-In-A-Haystack (NIAH): a target identifier is embedded among many

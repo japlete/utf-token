@@ -10,6 +10,7 @@ from uuid import UUID
 import httpx
 
 from scripts.benchmarks.niah_dataset import (
+    IDENTIFIER_FORMAT_INSTRUCTIONS,
     BenchmarkConfig,
     EncodingCondition,
     EncodingName,
@@ -138,6 +139,47 @@ class NiahIdentifierBenchmarkTests(unittest.TestCase):
         self.assertEqual(len(context_lines(hex_sample.prompt)), record_count)
         self.assertEqual(len(context_lines(utf_token_sample.prompt)), record_count)
 
+    def test_numeric_index_uses_unique_shuffled_integers(self) -> None:
+        config = BenchmarkConfig(context_length_target=50)
+        record_count = 12
+        sample = generate_sample(
+            config,
+            EncodingCondition(encoding="numeric_index", vocab="o200k"),
+            sample_index=1,
+            record_count=record_count,
+            context_character_target=500,
+        )
+        ids = [line.split("id=", maxsplit=1)[1] for line in context_lines(sample.prompt)]
+
+        self.assertEqual(len(ids), record_count)
+        self.assertEqual(len(set(ids)), record_count)
+        for identifier in ids:
+            self.assertRegex(identifier, r"^[0-9]+$")
+            self.assertLessEqual(int(identifier), 2 * record_count - 1)
+        self.assertRegex(sample.needle_value_text, r"^[0-9]+$")
+        self.assertIn(sample.needle_value_text, ids)
+
+    def test_numeric_index_prompt_describes_numbers_without_range(self) -> None:
+        instructions = IDENTIFIER_FORMAT_INSTRUCTIONS["numeric_index"]
+        self.assertIn("decimal numbers", instructions)
+        self.assertNotRegex(instructions, r"\brange\b")
+        self.assertNotRegex(instructions, r"2\s*\*")
+
+    def test_numeric_index_scores_exact_string_answer(self) -> None:
+        sample = generate_sample(
+            BenchmarkConfig(context_length_target=50),
+            EncodingCondition(encoding="numeric_index", vocab="o200k"),
+            sample_index=1,
+            record_count=10,
+            context_character_target=500,
+        )
+
+        score = score_response(sample, json.dumps({"id": sample.needle_value_text}))
+
+        self.assertTrue(score.exact_match)
+        self.assertTrue(score.normalized_match)
+        self.assertTrue(score.format_valid)
+
     def test_truncated_utf_token_scores_by_reversible_mapping(self) -> None:
         sample = generate_sample(
             BenchmarkConfig(context_length_target=50),
@@ -252,6 +294,7 @@ class NiahIdentifierBenchmarkTests(unittest.TestCase):
             ("raw_uuid", "o200k"),
             ("utf_token", "gemma4"),
             ("utf_token_truncate_3", "gemma4"),
+            ("numeric_index", "o200k"),
         ]
         for encoding, vocab in cases:
             with self.subTest(encoding=encoding):

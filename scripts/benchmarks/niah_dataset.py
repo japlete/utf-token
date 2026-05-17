@@ -18,6 +18,7 @@ EncodingName: TypeAlias = Literal[
     "raw_uuid",
     "utf_token",
     "utf_token_truncate_3",
+    "numeric_index",
 ]
 VocabName: TypeAlias = Literal["o200k", "gemma4"]
 
@@ -27,6 +28,7 @@ ENCODINGS: tuple[EncodingName, ...] = (
     "raw_uuid",
     "utf_token",
     "utf_token_truncate_3",
+    "numeric_index",
 )
 IDENTIFIER_FIELD = "id"
 
@@ -51,6 +53,11 @@ IDENTIFIER_FORMAT_INSTRUCTIONS: dict[EncodingName, str] = {
         "They always start *after* the key= prefix, and end *before* a new line."
         "Some ids may contain words or part of words, it's just a coincidence due to the use of tokens. "
         "Do not translate or fix typos in the ids. Transcribe them **verbatim**."
+    ),
+    "numeric_index": (
+        "The ids are decimal numbers. "
+        "They always start *after* the key= prefix, and end *before* a new line."
+        "Transcribe them **verbatim**, including any leading zeros."
     ),
 }
 
@@ -161,20 +168,33 @@ def generate_sample(
     rng = Random(seed + 1_000_000)
     codec = IdTokenBiMap(condition.vocab)
     needle_key = f"needle_{sample_index:04d}"
-    needle_value = render_identifier(payload, condition, codec)
-    needle_line = _format_record(needle_key, needle_value)
-
-    distractor_lines = [
-        _make_distractor_line(
-            rng=rng,
-            sample_index=sample_index,
-            distractor_index=distractor_index,
-            condition=condition,
-            codec=codec,
-            payload_bytes=config.payload_bytes,
+    if condition.encoding == "numeric_index":
+        _, needle_value, distractor_values = _make_numeric_index_assignments(
+            seed=seed,
+            record_count=record_count,
+            payload=payload,
         )
-        for distractor_index in range(1, record_count)
-    ]
+        distractor_lines = [
+            _format_record(
+                f"item_{sample_index:04d}_{distractor_index:05d}",
+                distractor_values[distractor_index - 1],
+            )
+            for distractor_index in range(1, record_count)
+        ]
+    else:
+        needle_value = render_identifier(payload, condition, codec)
+        distractor_lines = [
+            _make_distractor_line(
+                rng=rng,
+                sample_index=sample_index,
+                distractor_index=distractor_index,
+                condition=condition,
+                codec=codec,
+                payload_bytes=config.payload_bytes,
+            )
+            for distractor_index in range(1, record_count)
+        ]
+    needle_line = _format_record(needle_key, needle_value)
     context = _insert_needle(distractor_lines, needle_line, config.depth_percent)
     prompt = build_prompt(context, needle_key, condition.encoding)
     character_count = len(prompt)
@@ -312,6 +332,24 @@ def summarize_rows(rows: Iterable[dict[str, object]]) -> list[dict[str, object]]
     return summary
 
 
+def _make_numeric_index_assignments(
+    *,
+    seed: int,
+    record_count: int,
+    payload: bytes,
+) -> tuple[list[str], str, list[str]]:
+    if record_count < 1:
+        raise ValueError("record_count must be >= 1")
+    rng = Random(seed + 2_000_000)
+    values = rng.sample(range(2 * record_count), record_count)
+    rng.shuffle(values)
+    pool = [str(value) for value in values]
+    needle_slot = int.from_bytes(payload[:4], "big") % record_count
+    needle_value = pool[needle_slot]
+    distractor_values = [value for index, value in enumerate(pool) if index != needle_slot]
+    return pool, needle_value, distractor_values
+
+
 def _format_record(key: str, identifier: str) -> str:
     return f"key={key}: id={identifier}"
 
@@ -358,6 +396,8 @@ def _is_format_valid(encoding: EncodingName, value: str, codec: IdTokenBiMap) ->
         return _is_base64(value)
     if encoding == "raw_uuid":
         return _is_uuid(value)
+    if encoding == "numeric_index":
+        return value.isdigit()
     return value in codec
 
 

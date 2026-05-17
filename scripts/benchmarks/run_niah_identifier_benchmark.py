@@ -40,11 +40,14 @@ DEFAULT_PROMPT_EXAMPLE_PATH = DEFAULT_OUTPUT_DIR / "niah_identifier_prompt_examp
 DEFAULT_SAMPLES_PER_CELL = 100
 DEFAULT_CONTEXT_LENGTH_TARGET = 32_000
 DEFAULT_DEPTH_PERCENT = 50.0
-DEFAULT_BASE_SEED = 35
+DEFAULT_BASE_SEED = 39
 DEFAULT_MAX_OUTPUT_TOKENS = 64
-DEFAULT_ENCODINGS: tuple[EncodingName, ...] = ("utf_token", "utf_token_truncate_3",)
+DEFAULT_ENCODINGS: tuple[EncodingName, ...] = (
+    "utf_token",
+    "utf_token_truncate_3",
+)
 GEMINI_PRO_MIN_REASONING_TOKENS = 128
-RUN_ID = "niah_all_models_seed32"
+RUN_ID = "niah_seed39"
 IDENTIFIER_PATTERNS: dict[EncodingName, str] = {
     "raw_hex": "^[0-9a-fA-F]+$",
     "raw_base64": "^[A-Za-z0-9+/]+={0,2}$",
@@ -54,6 +57,7 @@ IDENTIFIER_PATTERNS: dict[EncodingName, str] = {
     ),
     "utf_token": "^[A-Za-z0-9_]+$",
     "utf_token_truncate_3": "^[A-Za-z0-9_]+$",
+    "numeric_index": "^[0-9]+$",
 }
 
 IDENTIFIER_MAX_LENGTHS: dict[EncodingName, int] = {
@@ -62,6 +66,7 @@ IDENTIFIER_MAX_LENGTHS: dict[EncodingName, int] = {
     "raw_uuid": 36,
     "utf_token": 54,
     "utf_token_truncate_3": 12,
+    "numeric_index": 10,
 }
 
 

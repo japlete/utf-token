@@ -3,26 +3,31 @@ from __future__ import annotations
 import base64
 import binascii
 from collections.abc import Iterable, Iterator
-from typing import TypeAlias, overload
+from typing import Literal, TypeAlias, overload
 from uuid import UUID
 
 from ._tables import DEFAULT_VOCAB, TableSpec, VocabName, pair_table, table_spec, tail_table
 
 Base64Value: TypeAlias = str | bytes
 UUIDValue: TypeAlias = UUID | str
+KeepBytesValue: TypeAlias = int | Literal["all"] | None
 
 
-def _validate_keep_bytes(keep_bytes: int | None) -> int | None:
-    if keep_bytes is None:
+def _validate_keep_bytes(keep_bytes: KeepBytesValue) -> int | None:
+    if keep_bytes is None or keep_bytes == "all":
         return None
+    if isinstance(keep_bytes, str):
+        raise ValueError(
+            f"keep_bytes string must be 'all'; got {keep_bytes!r}"
+        )
     if not isinstance(keep_bytes, int):
-        raise TypeError("keep_bytes must be an int or None")
+        raise TypeError("keep_bytes must be a positive int, None, or 'all'")
     if keep_bytes <= 0:
         raise ValueError("keep_bytes must be a positive integer")
     return keep_bytes
 
 
-def _truncate_input(data: bytes, *, keep_bytes: int | None) -> bytes:
+def _truncate_input(data: bytes, *, keep_bytes: KeepBytesValue) -> bytes:
     limit = _validate_keep_bytes(keep_bytes)
     if limit is None or len(data) <= limit:
         return data
@@ -94,7 +99,7 @@ def _encode_bytes_single(
     data: bytes,
     *,
     vocab: VocabName = DEFAULT_VOCAB,
-    keep_bytes: int | None = None,
+    keep_bytes: KeepBytesValue = None,
 ) -> str:
     data = _truncate_input(data, keep_bytes=keep_bytes)
     if not data:
@@ -140,7 +145,7 @@ def _fromhex_single(
     data: str,
     *,
     vocab: VocabName = DEFAULT_VOCAB,
-    keep_bytes: int | None = None,
+    keep_bytes: KeepBytesValue = None,
 ) -> str:
     return _encode_bytes_single(_decode_hex_bytes(data), vocab=vocab, keep_bytes=keep_bytes)
 
@@ -149,7 +154,7 @@ def _frombase64_single(
     data: str | bytes,
     *,
     vocab: VocabName = DEFAULT_VOCAB,
-    keep_bytes: int | None = None,
+    keep_bytes: KeepBytesValue = None,
 ) -> str:
     return _encode_bytes_single(
         _decode_base64_bytes(data),
@@ -162,7 +167,7 @@ def _fromuuid_single(
     data: UUID | str,
     *,
     vocab: VocabName = DEFAULT_VOCAB,
-    keep_bytes: int | None = None,
+    keep_bytes: KeepBytesValue = None,
 ) -> str:
     return _encode_bytes_single(_decode_uuid_bytes(data), vocab=vocab, keep_bytes=keep_bytes)
 
@@ -173,7 +178,7 @@ def frombytes(
     /,
     *,
     vocab: VocabName = DEFAULT_VOCAB,
-    keep_bytes: int | None = None,
+    keep_bytes: KeepBytesValue = None,
 ) -> str: ...
 
 
@@ -183,7 +188,7 @@ def frombytes(
     /,
     *,
     vocab: VocabName = DEFAULT_VOCAB,
-    keep_bytes: int | None = None,
+    keep_bytes: KeepBytesValue = None,
 ) -> Iterator[str]: ...
 
 
@@ -192,7 +197,7 @@ def frombytes(
     /,
     *,
     vocab: VocabName = DEFAULT_VOCAB,
-    keep_bytes: int | None = None,
+    keep_bytes: KeepBytesValue = None,
 ) -> str | Iterator[str]:
     """Encode raw bytes into the UTF-token string representation.
 
@@ -204,7 +209,9 @@ def frombytes(
         data: Raw bytes to encode, or an iterable of byte strings.
         vocab: Lookup table vocabulary. Supported values are ``"o200k"`` and
             ``"gemma4"``.
-        keep_bytes: Optional positive byte limit applied before encoding.
+        keep_bytes: How many leading bytes of each input to encode. Omitted or
+            ``None`` keeps the full input; ``"all"`` is an explicit synonym for
+            ``None``; a positive integer keeps that many leading bytes.
 
     Returns:
         A single encoded string for scalar input, or a lazy iterator of encoded
@@ -221,7 +228,7 @@ def fromhex(
     /,
     *,
     vocab: VocabName = DEFAULT_VOCAB,
-    keep_bytes: int | None = None,
+    keep_bytes: KeepBytesValue = None,
 ) -> str: ...
 
 
@@ -231,7 +238,7 @@ def fromhex(
     /,
     *,
     vocab: VocabName = DEFAULT_VOCAB,
-    keep_bytes: int | None = None,
+    keep_bytes: KeepBytesValue = None,
 ) -> Iterator[str]: ...
 
 
@@ -240,7 +247,7 @@ def fromhex(
     /,
     *,
     vocab: VocabName = DEFAULT_VOCAB,
-    keep_bytes: int | None = None,
+    keep_bytes: KeepBytesValue = None,
 ) -> str | Iterator[str]:
     """Encode hexadecimal input into the UTF-token string representation.
 
@@ -251,7 +258,10 @@ def fromhex(
         data: A hex string such as ``"0012ab"`` or an iterable of hex strings.
         vocab: Lookup table vocabulary. Supported values are ``"o200k"`` and
             ``"gemma4"``.
-        keep_bytes: Optional positive byte limit applied after hex decoding.
+        keep_bytes: How many leading bytes of the decoded payload to encode.
+            Omitted or ``None`` keeps the full input; ``"all"`` is an explicit
+            synonym for ``None``; a positive integer keeps that many leading
+            bytes.
 
     Returns:
         A single encoded string for scalar input, or a lazy iterator of encoded
@@ -268,7 +278,7 @@ def frombase64(
     /,
     *,
     vocab: VocabName = DEFAULT_VOCAB,
-    keep_bytes: int | None = None,
+    keep_bytes: KeepBytesValue = None,
 ) -> str: ...
 
 
@@ -278,7 +288,7 @@ def frombase64(
     /,
     *,
     vocab: VocabName = DEFAULT_VOCAB,
-    keep_bytes: int | None = None,
+    keep_bytes: KeepBytesValue = None,
 ) -> Iterator[str]: ...
 
 
@@ -287,7 +297,7 @@ def frombase64(
     /,
     *,
     vocab: VocabName = DEFAULT_VOCAB,
-    keep_bytes: int | None = None,
+    keep_bytes: KeepBytesValue = None,
 ) -> str | Iterator[str]:
     """Encode base64-decoded bytes into the UTF-token string representation.
 
@@ -299,8 +309,10 @@ def frombase64(
         data: A base64 string or bytes payload, or an iterable of them.
         vocab: Lookup table vocabulary. Supported values are ``"o200k"`` and
             ``"gemma4"``.
-        keep_bytes: Optional positive byte limit applied after base64
-            decoding.
+        keep_bytes: How many leading bytes of the decoded payload to encode.
+            Omitted or ``None`` keeps the full input; ``"all"`` is an explicit
+            synonym for ``None``; a positive integer keeps that many leading
+            bytes.
 
     Returns:
         A single encoded string for scalar input, or a lazy iterator of encoded
@@ -317,7 +329,7 @@ def fromuuid(
     /,
     *,
     vocab: VocabName = DEFAULT_VOCAB,
-    keep_bytes: int | None = None,
+    keep_bytes: KeepBytesValue = None,
 ) -> str: ...
 
 
@@ -327,7 +339,7 @@ def fromuuid(
     /,
     *,
     vocab: VocabName = DEFAULT_VOCAB,
-    keep_bytes: int | None = None,
+    keep_bytes: KeepBytesValue = None,
 ) -> Iterator[str]: ...
 
 
@@ -336,7 +348,7 @@ def fromuuid(
     /,
     *,
     vocab: VocabName = DEFAULT_VOCAB,
-    keep_bytes: int | None = None,
+    keep_bytes: KeepBytesValue = None,
 ) -> str | Iterator[str]:
     """Encode UUID values into the UTF-token string representation.
 
@@ -347,8 +359,10 @@ def fromuuid(
         data: A UUID object, a UUID string, or an iterable of either form.
         vocab: Lookup table vocabulary. Supported values are ``"o200k"`` and
             ``"gemma4"``.
-        keep_bytes: Optional positive byte limit applied after UUID
-            conversion.
+        keep_bytes: How many leading bytes of the UUID payload to encode.
+            Omitted or ``None`` keeps the full 16-byte UUID; ``"all"`` is an
+            explicit synonym for ``None``; a positive integer keeps that many
+            leading bytes.
 
     Returns:
         A single encoded string for scalar input, or a lazy iterator of encoded

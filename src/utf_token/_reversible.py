@@ -12,6 +12,7 @@ import Levenshtein
 
 from ._api import (
     Base64Value,
+    KeepBytesValue,
     UUIDValue,
     _decode_base64_bytes,
     _decode_hex_bytes,
@@ -23,6 +24,7 @@ from ._api import (
 from ._tables import DEFAULT_VOCAB, VocabName
 
 FORMAT_VERSION = 3
+DEFAULT_KEEP_BYTES = 3
 ForwardMapKey: TypeAlias = tuple[bytes, int | None]
 ErrorMode: TypeAlias = Literal["fix", "raise"]
 DEFAULT_ERROR_MODE: ErrorMode = "fix"
@@ -96,20 +98,20 @@ class IdTokenBiMap:
         self,
         data: bytes,
         *,
-        keep_bytes: int | None = None,
+        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
     ) -> str:
-        keep_bytes = _validate_keep_bytes(keep_bytes)
-        key = (data, keep_bytes)
+        normalized = _validate_keep_bytes(keep_bytes)
+        key = (data, normalized)
         with self._lock:
             cached = self._forward_map.get(key)
             if cached is not None:
                 return cached
 
-            working_bytes = _truncate_input(data, keep_bytes=keep_bytes)
+            working_bytes = _truncate_input(data, keep_bytes=normalized)
             encoded = _encode_bytes_single(working_bytes, vocab=self._vocab)
             mapping = self._reverse_map.get(encoded)
             if mapping is None or mapping.original_bytes == data:
-                return self._store_mapping(encoded, data, keep_bytes)
+                return self._store_mapping(encoded, data, normalized)
 
             candidate = working_bytes
             while True:
@@ -117,7 +119,7 @@ class IdTokenBiMap:
                 encoded = _encode_bytes_single(candidate, vocab=self._vocab)
                 mapping = self._reverse_map.get(encoded)
                 if mapping is None or mapping.original_bytes == data:
-                    return self._store_mapping(encoded, data, keep_bytes)
+                    return self._store_mapping(encoded, data, normalized)
 
     def _find_nearest_encoded(self, data: str) -> str | None:
         """Return the stored encoded identifier closest to `data`, or None if empty.
@@ -246,11 +248,15 @@ class IdTokenBiMap:
                         f"Mapping entry for {encoded!r} is missing encoding keep_bytes"
                     )
                 truncate_obj = encoding_dict.get("keep_bytes")
-                if truncate_obj is not None and not isinstance(truncate_obj, int):
+                if truncate_obj is None or truncate_obj == "all":
+                    encodings.add(None)
+                elif isinstance(truncate_obj, int):
+                    encodings.add(_validate_keep_bytes(truncate_obj))
+                else:
                     raise ValueError(
-                        f"Mapping entry for {encoded!r} has a non-integer keep_bytes"
+                        f"Mapping entry for {encoded!r} has an invalid keep_bytes; "
+                        "expected null, a positive integer, or 'all'"
                     )
-                encodings.add(_validate_keep_bytes(truncate_obj))
 
             if not encodings:
                 raise ValueError(f"Mapping entry for {encoded!r} must list at least one encoding")
@@ -284,7 +290,7 @@ class IdTokenBiMap:
         data: bytes,
         /,
         *,
-        keep_bytes: int | None = None,
+        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
     ) -> str: ...
 
     @overload
@@ -293,7 +299,7 @@ class IdTokenBiMap:
         data: Iterable[bytes],
         /,
         *,
-        keep_bytes: int | None = None,
+        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
     ) -> Iterator[str]: ...
 
     def frombytes(
@@ -301,8 +307,16 @@ class IdTokenBiMap:
         data: bytes | Iterable[bytes],
         /,
         *,
-        keep_bytes: int | None = None,
+        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
     ) -> str | Iterator[str]:
+        """Encode raw bytes and store the original for later reverse lookup.
+
+        ``keep_bytes`` defaults to ``3``: only the first three bytes of each
+        input are passed to the encoder. Pass a different positive integer to
+        keep more or fewer leading bytes, or pass ``None`` / ``"all"`` to
+        encode the full input. Reverse lookups always return the full original
+        bytes regardless of how many bytes were encoded.
+        """
         if isinstance(data, bytes):
             return self._encode_and_store_single(data, keep_bytes=keep_bytes)
         return (
@@ -316,7 +330,7 @@ class IdTokenBiMap:
         data: str,
         /,
         *,
-        keep_bytes: int | None = None,
+        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
     ) -> str: ...
 
     @overload
@@ -325,7 +339,7 @@ class IdTokenBiMap:
         data: Iterable[str],
         /,
         *,
-        keep_bytes: int | None = None,
+        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
     ) -> Iterator[str]: ...
 
     def fromhex(
@@ -333,8 +347,13 @@ class IdTokenBiMap:
         data: str | Iterable[str],
         /,
         *,
-        keep_bytes: int | None = None,
+        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
     ) -> str | Iterator[str]:
+        """Encode hex-decoded bytes and store the original for reverse lookup.
+
+        See :meth:`frombytes` for the ``keep_bytes`` contract; the default is
+        ``3``.
+        """
         if isinstance(data, str):
             return self._encode_and_store_single(
                 _decode_hex_bytes(data),
@@ -354,7 +373,7 @@ class IdTokenBiMap:
         data: Base64Value,
         /,
         *,
-        keep_bytes: int | None = None,
+        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
     ) -> str: ...
 
     @overload
@@ -363,7 +382,7 @@ class IdTokenBiMap:
         data: Iterable[Base64Value],
         /,
         *,
-        keep_bytes: int | None = None,
+        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
     ) -> Iterator[str]: ...
 
     def frombase64(
@@ -371,8 +390,13 @@ class IdTokenBiMap:
         data: Base64Value | Iterable[Base64Value],
         /,
         *,
-        keep_bytes: int | None = None,
+        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
     ) -> str | Iterator[str]:
+        """Encode base64-decoded bytes and store the original for reverse lookup.
+
+        See :meth:`frombytes` for the ``keep_bytes`` contract; the default is
+        ``3``.
+        """
         if isinstance(data, (str, bytes)):
             return self._encode_and_store_single(
                 _decode_base64_bytes(data),
@@ -392,7 +416,7 @@ class IdTokenBiMap:
         data: UUIDValue,
         /,
         *,
-        keep_bytes: int | None = None,
+        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
     ) -> str: ...
 
     @overload
@@ -401,7 +425,7 @@ class IdTokenBiMap:
         data: Iterable[UUIDValue],
         /,
         *,
-        keep_bytes: int | None = None,
+        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
     ) -> Iterator[str]: ...
 
     def fromuuid(
@@ -409,8 +433,13 @@ class IdTokenBiMap:
         data: UUIDValue | Iterable[UUIDValue],
         /,
         *,
-        keep_bytes: int | None = None,
+        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
     ) -> str | Iterator[str]:
+        """Encode UUID payloads and store the original for reverse lookup.
+
+        See :meth:`frombytes` for the ``keep_bytes`` contract; the default is
+        ``3``.
+        """
         if isinstance(data, (UUID, str)):
             return self._encode_and_store_single(
                 _decode_uuid_bytes(data),

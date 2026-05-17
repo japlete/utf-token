@@ -127,7 +127,7 @@ def render_identifier(payload: bytes, condition: EncodingCondition, codec: IdTok
         return str(UUID(bytes=payload))
     if condition.encoding == "utf_token_keep_3":
         return codec.frombytes(payload, keep_bytes=3)
-    return codec.frombytes(payload)
+    return codec.frombytes(payload, keep_bytes=None)
 
 
 def build_prompt(context: str, needle_key: str, encoding: EncodingName) -> str:

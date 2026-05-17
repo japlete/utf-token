@@ -1,9 +1,9 @@
 # NIAH Identifier Benchmark
 
 This benchmark checks whether `utf-token`-encoded random identifiers hurt long-context
-retrieval accuracy. The default run compares full `utf-token` identifiers with identifiers
-generated using `keep_bytes=3`; raw `hex`, `base64`, and `uuid` baselines are available
-with `--all-encodings`.
+retrieval accuracy. The default run compares full-input `utf-token` identifiers
+(`keep_bytes="all"`) with the library's default `keep_bytes=3` encoding; raw `hex`,
+`base64`, and `uuid` baselines are available with `--all-encodings`.
 
 It is inspired by Needle-In-A-Haystack (NIAH): a target identifier is embedded among many
 distractor key/id records, then the model must return the identifier for one requested key as
@@ -21,7 +21,7 @@ identifier encoding:
 - Needle depth: 50% of the generated record list.
 - Payload size: 16 bytes, so every sample has a UUID representation.
 - Samples per cell: 100 by default.
-- Default encodings: `utf_token` and `utf_token_keep_3`.
+- Default encodings: `utf_token` (full-input) and `utf_token_keep_3` (the library default).
 - Total default calls: 2 encodings x 3 models x 100 samples = 600 OpenRouter calls.
 - With `--all-encodings`: 5 encodings x 3 models x 100 samples = 1,500 OpenRouter calls.
 

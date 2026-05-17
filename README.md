@@ -4,7 +4,7 @@ Convert random string identifiers to a LLM-friendly format to reduce token usage
 
 `utf-token` encodes only the first three bytes of each identifier by default, so any payload — UUIDs, hex hashes, base64 ids — typically becomes about two `o200k_base` tokens regardless of its original length:
 
-![token savings vs hex, base64, and uuid](docs/assets/notebooks/token_savings.png)
+![token savings vs hex, base64, and uuid](docs/assets/benchmarks/token_savings.png)
 
 The conversion stays fully reversible through `IdTokenBiMap`, which stores the original bytes behind every generated string.
 
@@ -153,7 +153,7 @@ Collisions can happen when different inputs produce the same encoded string, esp
 uv run --group offline scripts/token_savings_examples.py
 ```
 
-This regenerates [`docs/assets/notebooks/token_savings.png`](docs/assets/notebooks/token_savings.png) from random payloads of 4 to 32 bytes.
+This regenerates [`docs/assets/benchmarks/token_savings.png`](docs/assets/benchmarks/token_savings.png) from random payloads of 4 to 32 bytes.
 
 ## Project and release docs
 

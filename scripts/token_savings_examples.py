@@ -41,7 +41,7 @@ DEFAULT_NUM_SAMPLES = 200
 DEFAULT_SEED = 39
 DEFAULT_MIN_BYTES = 4
 DEFAULT_MAX_BYTES = 32
-DEFAULT_OUTPUT_DIR = Path("docs/assets/notebooks")
+DEFAULT_OUTPUT_DIR = Path("docs/assets/benchmarks")
 DEFAULT_PLOT_NAME = "token_savings.png"
 UUID_BYTE_LENGTH = 16
 

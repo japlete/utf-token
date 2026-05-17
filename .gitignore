@@ -17,8 +17,6 @@ data/token_vocab/
 # Old files
 **/.graveyard/
 
-# Local notebook outputs
-docs/assets/notebooks
 docs/assets/benchmarks/*.jsonl
 
 # Claude repo instructions (if you use Claude simply create a local symlink to AGENTS.md named CLAUDE.md)

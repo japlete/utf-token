@@ -73,6 +73,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+        with:
+          # Must see the release we just uploaded; restored cache can serve a stale simple index.
+          enable-cache: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
@@ -84,6 +87,7 @@ jobs:
         run: >
           uv pip install
           --no-config
+          --refresh-package utf-token
           --index-strategy unsafe-best-match
           --python .venv-testpypi/bin/python
           --default-index https://pypi.org/simple

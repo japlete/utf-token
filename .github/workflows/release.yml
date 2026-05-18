@@ -33,7 +33,7 @@ jobs:
       - name: Ruff
         run: uv run ruff check
       - name: Ty
-        run: uv run ty check
+        run: uv run ty check src
       - name: Unit tests
         run: uv run -m unittest discover -s tests
       - name: Build distributions

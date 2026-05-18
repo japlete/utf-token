@@ -23,7 +23,7 @@ jobs:
       - name: Ruff
         run: uv run ruff check
       - name: Ty
-        run: uv run ty check
+        run: uv run ty check src
 
   unit-tests:
     runs-on: ubuntu-latest

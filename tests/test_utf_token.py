@@ -34,14 +34,17 @@ def _bitstream_encode(
     tail_tokens: tuple[str, ...],
     pair_index_bits: int,
     tail_index_bits: int,
+    input_bit_length: int | None = None,
 ) -> str:
     """Reference encoder used by the 15-bit assertions, mirrors the production path."""
 
     if not data:
         return ""
-    total_bits = 8 * len(data)
+    total_bits = input_bit_length if input_bit_length is not None else 8 * len(data)
     full_chunks, residual_bits = divmod(total_bits, pair_index_bits)
     value = int.from_bytes(data, byteorder="big", signed=False)
+    if input_bit_length is not None and len(data) * 8 > input_bit_length:
+        value >>= len(data) * 8 - input_bit_length
     pair_mask = (1 << pair_index_bits) - 1
     parts: list[str] = []
     for chunk_index in range(full_chunks):
@@ -74,6 +77,37 @@ def _gemma4_encode(data: bytes) -> str:
         tail_tokens=GEMMA4_TAIL_TABLE,
         pair_index_bits=GEMMA4_SPEC.pair_index_bits,
         tail_index_bits=GEMMA4_SPEC.tail_index_bits,
+    )
+
+
+def _encode_top_bits(
+    data: bytes,
+    keep_bits: int,
+    *,
+    pair_tokens: tuple[str, ...],
+    tail_tokens: tuple[str, ...],
+    pair_index_bits: int,
+    tail_index_bits: int,
+) -> str:
+    total_bits = len(data) * 8
+    if total_bits <= keep_bits:
+        return _bitstream_encode(
+            data,
+            pair_tokens=pair_tokens,
+            tail_tokens=tail_tokens,
+            pair_index_bits=pair_index_bits,
+            tail_index_bits=tail_index_bits,
+        )
+    value = int.from_bytes(data, byteorder="big", signed=False) >> (total_bits - keep_bits)
+    out_len = (keep_bits + 7) // 8
+    truncated = value.to_bytes(out_len, byteorder="big")
+    return _bitstream_encode(
+        truncated,
+        pair_tokens=pair_tokens,
+        tail_tokens=tail_tokens,
+        pair_index_bits=pair_index_bits,
+        tail_index_bits=tail_index_bits,
+        input_bit_length=keep_bits,
     )
 
 
@@ -163,14 +197,16 @@ class FromBytesGemma4Tests(unittest.TestCase):
 
     def test_truncates_before_encoding(self) -> None:
         raw = b"\x12\x34\xab"
-        self.assertEqual(
-            frombytes(raw, keep_bytes=2, vocab="gemma4"),
-            _gemma4_encode(b"\x12\x34"),
+        expected_15 = _encode_top_bits(
+            raw,
+            15,
+            pair_tokens=GEMMA4_PAIR_TABLE,
+            tail_tokens=GEMMA4_TAIL_TABLE,
+            pair_index_bits=GEMMA4_SPEC.pair_index_bits,
+            tail_index_bits=GEMMA4_SPEC.tail_index_bits,
         )
-        self.assertEqual(
-            frombytes(raw, keep_bytes=1, vocab="gemma4"),
-            GEMMA4_TAIL_TABLE[0x12],
-        )
+        self.assertEqual(frombytes(raw, keep_bits=15, vocab="gemma4"), expected_15)
+        self.assertEqual(frombytes(raw, keep_bits=30, vocab="gemma4"), _gemma4_encode(raw))
 
     def test_iterable_supports_gemma4_vocab(self) -> None:
         result = frombytes([b"\x00\x00", b"\x00\x01"], vocab="gemma4")
@@ -250,13 +286,34 @@ class FromBytesBitstreamTests(unittest.TestCase):
 
     def test_truncates_before_encoding(self) -> None:
         raw = b"\x12\x34\xab"
-        self.assertEqual(frombytes(raw, keep_bytes=2), _o200k_encode(b"\x12\x34"))
-        self.assertEqual(frombytes(raw, keep_bytes=1), O200K_TAIL_TABLE[0x12])
+        expected_15 = _encode_top_bits(
+            raw,
+            15,
+            pair_tokens=O200K_PAIR_TABLE,
+            tail_tokens=O200K_TAIL_TABLE,
+            pair_index_bits=O200K_SPEC.pair_index_bits,
+            tail_index_bits=O200K_SPEC.tail_index_bits,
+        )
+        self.assertEqual(frombytes(raw, keep_bits=15), expected_15)
+        self.assertEqual(frombytes(raw, keep_bits=30), _o200k_encode(raw))
 
-    def test_keep_bytes_larger_than_input_is_noop(self) -> None:
+    def test_keep_bits_30_uses_two_pair_chunks(self) -> None:
+        raw = b"\x12\x34\xab\xcd\xef"
+        encoded = frombytes(raw, keep_bits=30)
+        expected = _encode_top_bits(
+            raw,
+            30,
+            pair_tokens=O200K_PAIR_TABLE,
+            tail_tokens=O200K_TAIL_TABLE,
+            pair_index_bits=O200K_SPEC.pair_index_bits,
+            tail_index_bits=O200K_SPEC.tail_index_bits,
+        )
+        self.assertEqual(encoded, expected)
+
+    def test_keep_bits_larger_than_input_is_noop(self) -> None:
         raw = b"\x12\x34\xab"
-        self.assertEqual(frombytes(raw, keep_bytes=10), frombytes(raw))
-        self.assertEqual(fromhex("1234ab", keep_bytes=10), frombytes(raw))
+        self.assertEqual(frombytes(raw, keep_bits=45), frombytes(raw))
+        self.assertEqual(fromhex("1234ab", keep_bits=45), frombytes(raw))
 
 
 class FormatAdaptersTests(unittest.TestCase):
@@ -272,12 +329,12 @@ class FormatAdaptersTests(unittest.TestCase):
 
     def test_format_adapters_apply_truncation_after_decoding(self) -> None:
         zero_uuid = UUID("00000000-0000-0000-0000-000000000000")
-        expected_two = _o200k_encode(b"\x12\x34")
-        self.assertEqual(fromhex("1234ab", keep_bytes=2), expected_two)
-        self.assertEqual(frombase64("EjSr", keep_bytes=2), expected_two)
+        expected_prefix = frombytes(b"\x12\x34\xab", keep_bits=15)
+        self.assertEqual(fromhex("1234ab", keep_bits=15), expected_prefix)
+        self.assertEqual(frombase64("EjSr", keep_bits=15), expected_prefix)
         self.assertEqual(
-            fromuuid(zero_uuid, keep_bytes=2),
-            _o200k_encode(b"\x00\x00"),
+            fromuuid(zero_uuid, keep_bits=15),
+            frombytes(b"\x00\x00", keep_bits=15),
         )
 
     def test_frombase64_supports_str_and_bytes(self) -> None:
@@ -298,18 +355,26 @@ class FormatAdaptersTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             frombytes(b"\x00\x00", vocab=cast(VocabName, "invalid"))
 
-    def test_invalid_keep_bytes_raises_value_error(self) -> None:
+    def test_invalid_keep_bits_raises_value_error(self) -> None:
         zero_uuid = UUID("00000000-0000-0000-0000-000000000000")
-        for keep_bytes in (0, -1):
-            with self.subTest(keep_bytes=keep_bytes):
+        for keep_bits in (0, -1):
+            with self.subTest(keep_bits=keep_bits):
                 with self.assertRaises(ValueError):
-                    frombytes(b"\x00\x01", keep_bytes=keep_bytes)
+                    frombytes(b"\x00\x01", keep_bits=keep_bits)
                 with self.assertRaises(ValueError):
-                    fromhex("0001", keep_bytes=keep_bytes)
+                    fromhex("0001", keep_bits=keep_bits)
                 with self.assertRaises(ValueError):
-                    frombase64("AAE=", keep_bytes=keep_bytes)
+                    frombase64("AAE=", keep_bits=keep_bits)
                 with self.assertRaises(ValueError):
-                    fromuuid(zero_uuid, keep_bytes=keep_bytes)
+                    fromuuid(zero_uuid, keep_bits=keep_bits)
+
+    def test_non_multiple_keep_bits_raises_value_error(self) -> None:
+        for keep_bits in (8, 16, 24):
+            with self.subTest(keep_bits=keep_bits):
+                with self.assertRaises(ValueError):
+                    frombytes(b"\x00\x01", keep_bits=keep_bits)
+                with self.assertRaises(ValueError):
+                    IdTokenBiMap(keep_bits=keep_bits)
 
 
 class FromBytesIterableTests(unittest.TestCase):
@@ -339,62 +404,62 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(codec.tohex(encoded), "1234ab")
         self.assertEqual(codec.tobase64(encoded), "EjSr")
 
-    def test_default_truncates_to_three_bytes(self) -> None:
+    def test_default_truncates_to_thirty_bits(self) -> None:
         codec = IdTokenBiMap()
         original = b"\x12\x34\xab\xcd\xef"
         encoded = codec.frombytes(original)
-        self.assertEqual(encoded, _o200k_encode(b"\x12\x34\xab"))
+        self.assertEqual(encoded, frombytes(original, keep_bits=30))
         self.assertEqual(codec.tobytes(encoded), original)
         self.assertEqual(codec.tohex(encoded), "1234abcdef")
 
-    def test_default_matches_standalone_three_byte_encoding(self) -> None:
+    def test_default_matches_standalone_thirty_bit_encoding(self) -> None:
         codec = IdTokenBiMap()
         raw = b"\x12\x34\xab\xcd\xef"
-        self.assertEqual(codec.frombytes(raw), frombytes(raw, keep_bytes=3))
+        self.assertEqual(codec.frombytes(raw), frombytes(raw, keep_bits=30))
 
     def test_standalone_default_keeps_full_input(self) -> None:
         raw = b"\x12\x34\xab\xcd\xef"
         self.assertEqual(frombytes(raw), _o200k_encode(raw))
 
     def test_truncated_encoding_reverses_to_full_original(self) -> None:
-        codec = IdTokenBiMap(keep_bytes=2)
+        codec = IdTokenBiMap(keep_bits=15)
         encoded = codec.frombytes(b"\x12\x34\xab")
-        self.assertEqual(encoded, _o200k_encode(b"\x12\x34"))
+        self.assertEqual(encoded, frombytes(b"\x12\x34\xab", keep_bits=15))
         self.assertEqual(codec.tobytes(encoded), b"\x12\x34\xab")
         self.assertEqual(codec.tohex(encoded), "1234ab")
 
-    def test_keep_bytes_all_equivalent_to_none(self) -> None:
+    def test_keep_bits_all_equivalent_to_none(self) -> None:
         raw = b"\x12\x34\xab\xcd\xef"
-        codec_none = IdTokenBiMap(keep_bytes=None)
-        codec_all = IdTokenBiMap(keep_bytes="all")
+        codec_none = IdTokenBiMap(keep_bits=None)
+        codec_all = IdTokenBiMap(keep_bits="all")
         encoded_none = codec_none.frombytes(raw)
         encoded_all = codec_all.frombytes(raw)
         self.assertEqual(encoded_none, encoded_all)
         self.assertEqual(encoded_none, _o200k_encode(raw))
 
         standalone_none = frombytes(raw)
-        standalone_all = frombytes(raw, keep_bytes="all")
+        standalone_all = frombytes(raw, keep_bits="all")
         self.assertEqual(standalone_none, standalone_all)
         self.assertEqual(standalone_none, _o200k_encode(raw))
 
-    def test_keep_bytes_all_normalizes_iterables(self) -> None:
+    def test_keep_bits_all_normalizes_iterables(self) -> None:
         raw = b"\x12\x34\xab\xcd\xef"
-        codec_none = IdTokenBiMap(keep_bytes=None)
-        codec_all = IdTokenBiMap(keep_bytes="all")
+        codec_none = IdTokenBiMap(keep_bits=None)
+        codec_all = IdTokenBiMap(keep_bits="all")
         iter_none = list(codec_none.frombytes(iter([raw])))
         iter_all = list(codec_all.frombytes(iter([raw])))
         self.assertEqual(iter_none, iter_all)
 
-        standalone_none = list(frombytes(iter([raw]), keep_bytes=None))
-        standalone_all = list(frombytes(iter([raw]), keep_bytes="all"))
+        standalone_none = list(frombytes(iter([raw]), keep_bits=None))
+        standalone_all = list(frombytes(iter([raw]), keep_bits="all"))
         self.assertEqual(standalone_none, standalone_all)
         self.assertEqual(standalone_none, [_o200k_encode(raw)])
 
-    def test_invalid_keep_bytes_string_raises_value_error(self) -> None:
+    def test_invalid_keep_bits_string_raises_value_error(self) -> None:
         with self.assertRaises(ValueError):
-            IdTokenBiMap(keep_bytes=cast(Any, "bogus"))
+            IdTokenBiMap(keep_bits=cast(Any, "bogus"))
         with self.assertRaises(ValueError):
-            frombytes(b"\x00\x01", keep_bytes=cast(Any, "bogus"))
+            frombytes(b"\x00\x01", keep_bits=cast(Any, "bogus"))
 
     def test_round_trips_format_adapters(self) -> None:
         codec = IdTokenBiMap()
@@ -410,7 +475,7 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(codec.touuid(uuid_encoded), zero_uuid)
 
     def test_round_trips_under_gemma4_vocab(self) -> None:
-        codec = IdTokenBiMap("gemma4", keep_bytes=None)
+        codec = IdTokenBiMap("gemma4", keep_bits=None)
         raw = b"\x12\x34\xab"
         encoded = codec.frombytes(raw)
         self.assertEqual(encoded, _gemma4_encode(raw))
@@ -454,7 +519,7 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(codec.tobytes(second), b"\x00\x02")
 
     def test_heal_substitution(self) -> None:
-        codec = IdTokenBiMap("gemma4", keep_bytes=None)
+        codec = IdTokenBiMap("gemma4", keep_bits=None)
         target = codec.frombytes(bytes.fromhex("3596e50a4202255eeeb0f5964097f49a"))
         if not target:
             self.skipTest("encoded target unexpectedly empty")
@@ -463,7 +528,7 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(codec.tobytes(garbled), codec.tobytes(target))
 
     def test_heal_deletion(self) -> None:
-        codec = IdTokenBiMap("gemma4", keep_bytes=None)
+        codec = IdTokenBiMap("gemma4", keep_bits=None)
         target = codec.frombytes(bytes.fromhex("3596e50a4202255eeeb0f5964097f49a"))
         if len(target) < 2:
             self.skipTest("encoded target too short to delete a character")
@@ -472,7 +537,7 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(codec.tobytes(garbled), codec.tobytes(target))
 
     def test_heal_insertion_of_non_ascii(self) -> None:
-        codec = IdTokenBiMap("gemma4", keep_bytes=None)
+        codec = IdTokenBiMap("gemma4", keep_bits=None)
         target = codec.frombytes(bytes.fromhex("3596e50a4202255eeeb0f5964097f49a"))
         if len(target) < 4:
             self.skipTest("encoded target too short for insertion test")
@@ -482,7 +547,7 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(codec.tobytes(garbled), codec.tobytes(target))
 
     def test_heal_whitespace_insertion(self) -> None:
-        codec = IdTokenBiMap("gemma4", keep_bytes=None)
+        codec = IdTokenBiMap("gemma4", keep_bits=None)
         target = codec.frombytes(bytes.fromhex("3596e50a4202255eeeb0f5964097f49a"))
         if len(target) < 4:
             self.skipTest("encoded target too short for whitespace test")
@@ -492,7 +557,7 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(codec.tobytes(garbled), codec.tobytes(target))
 
     def test_heal_picks_nearest_among_distinct_identifiers(self) -> None:
-        codec = IdTokenBiMap("gemma4", keep_bytes=None)
+        codec = IdTokenBiMap("gemma4", keep_bits=None)
         first = codec.frombytes(bytes.fromhex("3596e50a4202255eeeb0f5964097f49a"))
         second = codec.frombytes(bytes.fromhex("7a80ac94a5e07832ff53aa34473402bd"))
         garbled_first = first[:-1] + ("Z" if first[-1] != "Z" else "Y")
@@ -565,14 +630,14 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(codec.tobytes(first), b"\x00\x01\x27")
 
     def test_reuses_same_output_for_repeated_truncation_setting(self) -> None:
-        codec = IdTokenBiMap(keep_bytes=2)
+        codec = IdTokenBiMap(keep_bits=15)
         first = codec.frombytes(b"\x12\x34\xab")
         second = codec.frombytes(b"\x12\x34\xab")
         self.assertEqual(first, second)
 
-    def test_different_keep_bytes_instances_encode_differently(self) -> None:
-        raw = b"\x12\x34\xab"
-        truncated = IdTokenBiMap(keep_bytes=2).frombytes(raw)
+    def test_different_keep_bits_instances_encode_differently(self) -> None:
+        raw = b"\x12\x34\xab\xcd\xef"
+        truncated = IdTokenBiMap(keep_bits=15).frombytes(raw)
         default = IdTokenBiMap().frombytes(raw)
         self.assertNotEqual(truncated, default)
 
@@ -589,7 +654,7 @@ class IdTokenBiMapTests(unittest.TestCase):
                 stage1_second = frombytes(second_input, vocab=vocab)
                 self.assertEqual(stage1_first, stage1_second)
 
-                codec = IdTokenBiMap(vocab, keep_bytes=None)
+                codec = IdTokenBiMap(vocab, keep_bits=None)
                 first = codec.frombytes(first_input)
                 second = codec.frombytes(second_input)
 
@@ -616,21 +681,20 @@ class IdTokenBiMapTests(unittest.TestCase):
         raise AssertionError(f"No natural collision found in vocab {vocab!r}")
 
     def test_remaps_collision_created_by_truncation(self) -> None:
-        # Two distinct 3-byte values collapse to the same 2-byte prefix under
+        # Two distinct 3-byte values share the same top 15 bits under
         # truncation, so their forward encodings are identical until the codec
-        # increments one. This invariant must hold regardless of the underlying
-        # encoding scheme (15-bit o200k or 16-bit gemma4).
+        # increments one.
         vocabs: tuple[VocabName, ...] = ("o200k", "gemma4")
         for vocab in vocabs:
             with self.subTest(vocab=vocab):
-                codec = IdTokenBiMap(vocab, keep_bytes=2)
+                codec = IdTokenBiMap(vocab, keep_bits=15)
                 first_raw = bytes.fromhex("123400")
                 second_raw = bytes.fromhex("1234ff")
 
                 first = codec.frombytes(first_raw)
                 second = codec.frombytes(second_raw)
 
-                self.assertEqual(first, frombytes(b"\x12\x34", vocab=vocab))
+                self.assertEqual(first, frombytes(first_raw, keep_bits=15, vocab=vocab))
                 self.assertNotEqual(first, second)
                 self.assertEqual(codec.tobytes(first), first_raw)
                 self.assertEqual(codec.tobytes(second), second_raw)
@@ -643,19 +707,19 @@ class IdTokenBiMapTests(unittest.TestCase):
         self.assertEqual(codec.tobytes(encoded), raw)
 
     def test_dict_and_json_round_trip(self) -> None:
-        codec = IdTokenBiMap(keep_bytes=3)
+        codec = IdTokenBiMap(keep_bits=30)
         raw = b"\x00\x01\xab\xcd"
         encoded = codec.frombytes(raw)
 
         payload = codec.to_dict()
         self.assertEqual(payload["format_version"], FORMAT_VERSION)
         self.assertEqual(payload["vocab"], "o200k")
-        self.assertEqual(payload["keep_bytes"], 3)
+        self.assertEqual(payload["keep_bits"], 30)
         mappings = cast(dict[str, str], payload["mappings"])
         self.assertEqual(mappings[encoded], raw.hex())
 
         clone = IdTokenBiMap.from_dict(payload)
-        self.assertEqual(clone.keep_bytes, 3)
+        self.assertEqual(clone.keep_bits, 30)
         self.assertEqual(clone.tobytes(encoded), raw)
         self.assertEqual(clone.frombytes(raw), encoded)
 
@@ -669,14 +733,14 @@ class IdTokenBiMapTests(unittest.TestCase):
         payload: dict[str, object] = {
             "format_version": FORMAT_VERSION,
             "vocab": "o200k",
-            "keep_bytes": "all",
+            "keep_bits": "all",
             "mappings": {full_encoded: raw.hex()},
         }
         clone = IdTokenBiMap.from_dict(payload)
-        self.assertIsNone(clone.keep_bytes)
+        self.assertIsNone(clone.keep_bits)
         self.assertEqual(clone.tobytes(full_encoded), raw)
         roundtrip = clone.to_dict()
-        self.assertIsNone(roundtrip["keep_bytes"])
+        self.assertIsNone(roundtrip["keep_bits"])
         self.assertEqual(clone.frombytes(raw), full_encoded)
 
     def test_import_rejects_conflicting_forward_mapping(self) -> None:
@@ -685,7 +749,7 @@ class IdTokenBiMapTests(unittest.TestCase):
                 {
                     "format_version": FORMAT_VERSION,
                     "vocab": "o200k",
-                    "keep_bytes": None,
+                    "keep_bits": None,
                     "mappings": {
                         "first": "0001",
                         "second": "0001",
@@ -708,9 +772,11 @@ class IdTokenBiMapTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             codec.touuid(encoded)
 
-    def test_invalid_keep_bytes_raises_value_error(self) -> None:
+    def test_invalid_keep_bits_raises_value_error(self) -> None:
         with self.assertRaises(ValueError):
-            IdTokenBiMap(keep_bytes=0)
+            IdTokenBiMap(keep_bits=0)
+        with self.assertRaises(ValueError):
+            IdTokenBiMap(keep_bits=24)
 
     def test_thread_safe_per_instance(self) -> None:
         codec = IdTokenBiMap()

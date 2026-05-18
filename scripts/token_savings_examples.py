@@ -3,7 +3,7 @@
 For each byte length in a configurable range, the script samples random
 payloads, encodes them as hex, base64, UUID (when the length is 16), and the
 default ``utf-token`` representation (the standalone encoder with
-``keep_bytes=3``), then measures the resulting ``o200k_base`` token counts
+``keep_bits=30``), then measures the resulting ``o200k_base`` token counts
 and saves a percent-savings plot for the README.
 
 Run with::
@@ -57,7 +57,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Sample random byte payloads at multiple lengths and plot the "
-            "percent token savings of utf-token (keep_bytes=3) compared with "
+            "percent token savings of utf-token (keep_bits=30) compared with "
             "hex, base64, and UUID textual encodings."
         )
     )
@@ -135,7 +135,7 @@ def main() -> None:
 
     for sample_bytes in byte_lengths:
         payloads = make_payloads(args.num_samples, sample_bytes, seed=args.seed)
-        utf_texts = [frombytes(payload, keep_bytes=3) for payload in payloads]
+        utf_texts = [frombytes(payload, keep_bits=30) for payload in payloads]
         utf_avg = average_tokens(utf_texts, tokenizer)
 
         hex_metrics = measure_format(

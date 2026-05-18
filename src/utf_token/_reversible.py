@@ -11,19 +11,21 @@ import Levenshtein
 
 from ._api import (
     Base64Value,
-    KeepBytesValue,
+    KeepBitsValue,
     UUIDValue,
     _decode_base64_bytes,
     _decode_hex_bytes,
     _decode_uuid_bytes,
     _encode_bytes_single,
-    _truncate_input,
-    _validate_keep_bytes,
+    _increment_prefix,
+    _prefix_exceeds_keep_bits,
+    _truncate_for_encode,
+    _validate_keep_bits,
 )
-from ._tables import DEFAULT_VOCAB, VocabName
+from ._tables import DEFAULT_VOCAB, VocabName, table_spec
 
-FORMAT_VERSION = 4
-DEFAULT_KEEP_BYTES = 3
+FORMAT_VERSION = 5
+DEFAULT_KEEP_BITS = 30
 ErrorMode: TypeAlias = Literal["fix", "raise"]
 DEFAULT_ERROR_MODE: ErrorMode = "fix"
 
@@ -46,20 +48,14 @@ def _validate_vocab_name(value: str) -> VocabName:
     raise ValueError(f"Unsupported vocab {value!r}")
 
 
-def _parse_payload_keep_bytes(value: object) -> KeepBytesValue:
+def _parse_payload_keep_bits(value: object) -> KeepBitsValue:
     if value is None or value == "all":
         return None if value is None else "all"
     if isinstance(value, int):
         return value
     raise ValueError(
-        "Mapping payload keep_bytes must be null, a positive integer, or 'all'"
+        "Mapping payload keep_bits must be null, a positive integer, or 'all'"
     )
-
-
-def _increment_bytes(data: bytes) -> bytes:
-    next_value = int.from_bytes(data, byteorder="big", signed=False) + 1
-    width = max(len(data), (next_value.bit_length() + 7) // 8, 1)
-    return next_value.to_bytes(width, byteorder="big", signed=False)
 
 
 class IdTokenBiMap:
@@ -67,17 +63,22 @@ class IdTokenBiMap:
         self,
         vocab: VocabName = DEFAULT_VOCAB,
         *,
-        keep_bytes: KeepBytesValue = DEFAULT_KEEP_BYTES,
+        keep_bits: KeepBitsValue = DEFAULT_KEEP_BITS,
     ) -> None:
         self._vocab = vocab
-        self._keep_bytes: int | None = _validate_keep_bytes(keep_bytes)
+        spec = table_spec(vocab)
+        self._keep_bits: int | None = _validate_keep_bits(
+            keep_bits,
+            pair_index_bits=spec.pair_index_bits,
+            vocab=vocab,
+        )
         self._reverse_map: dict[str, bytes] = {}
         self._forward_map: dict[bytes, str] = {}
         self._lock = RLock()
 
     @property
-    def keep_bytes(self) -> int | None:
-        return self._keep_bytes
+    def keep_bits(self) -> int | None:
+        return self._keep_bits
 
     def __contains__(self, item: object) -> bool:
         if not isinstance(item, str):
@@ -90,22 +91,33 @@ class IdTokenBiMap:
         self._forward_map[original_bytes] = encoded
         return encoded
 
+    def _encode_candidate(self, candidate: bytes) -> str:
+        if self._keep_bits is not None and _prefix_exceeds_keep_bits(
+            candidate, keep_bits=self._keep_bits
+        ):
+            return _encode_bytes_single(candidate, vocab=self._vocab, keep_bits=None)
+        return _encode_bytes_single(
+            candidate, vocab=self._vocab, keep_bits=self._keep_bits
+        )
+
     def _encode_and_store_single(self, data: bytes) -> str:
         with self._lock:
             cached = self._forward_map.get(data)
             if cached is not None:
                 return cached
 
-            working_bytes = _truncate_input(data, keep_bytes=self._keep_bytes)
-            encoded = _encode_bytes_single(working_bytes, vocab=self._vocab)
+            encoded = _encode_bytes_single(
+                data, vocab=self._vocab, keep_bits=self._keep_bits
+            )
             existing = self._reverse_map.get(encoded)
             if existing is None or existing == data:
                 return self._store_mapping(encoded, data)
 
+            working_bytes, _ = _truncate_for_encode(data, keep_bits=self._keep_bits)
             candidate = working_bytes
             while True:
-                candidate = _increment_bytes(candidate)
-                encoded = _encode_bytes_single(candidate, vocab=self._vocab)
+                candidate = _increment_prefix(candidate, keep_bits=self._keep_bits)
+                encoded = self._encode_candidate(candidate)
                 existing = self._reverse_map.get(encoded)
                 if existing is None or existing == data:
                     return self._store_mapping(encoded, data)
@@ -174,7 +186,7 @@ class IdTokenBiMap:
             return {
                 "format_version": FORMAT_VERSION,
                 "vocab": self._vocab,
-                "keep_bytes": self._keep_bytes,
+                "keep_bits": self._keep_bits,
                 "mappings": mappings,
             }
 
@@ -195,15 +207,15 @@ class IdTokenBiMap:
             raise ValueError("Mapping payload must contain a 'vocab' string")
         vocab = _validate_vocab_name(vocab_obj)
 
-        if "keep_bytes" not in payload:
-            raise ValueError("Mapping payload must contain 'keep_bytes'")
-        keep_bytes_raw = _parse_payload_keep_bytes(payload.get("keep_bytes"))
+        if "keep_bits" not in payload:
+            raise ValueError("Mapping payload must contain 'keep_bits'")
+        keep_bits_raw = _parse_payload_keep_bits(payload.get("keep_bits"))
 
         mappings_obj = payload.get("mappings")
         if not isinstance(mappings_obj, dict):
             raise ValueError("Mapping payload must contain a 'mappings' object")
 
-        instance = cls(vocab, keep_bytes=keep_bytes_raw)
+        instance = cls(vocab, keep_bits=keep_bits_raw)
 
         for encoded, entry in mappings_obj.items():
             if not isinstance(encoded, str):
@@ -247,9 +259,9 @@ class IdTokenBiMap:
     def frombytes(self, data: bytes | Iterable[bytes], /) -> str | Iterator[str]:
         """Encode raw bytes and store the original for later reverse lookup.
 
-        Truncation is controlled by the instance ``keep_bytes`` set at
+        Truncation is controlled by the instance ``keep_bits`` set at
         construction. Reverse lookups always return the full original bytes
-        regardless of how many bytes were encoded.
+        regardless of how many bits were encoded.
         """
         if isinstance(data, bytes):
             return self._encode_and_store_single(data)

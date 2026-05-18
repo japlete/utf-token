@@ -17,7 +17,7 @@ EncodingName: TypeAlias = Literal[
     "raw_base64",
     "raw_uuid",
     "utf_token",
-    "utf_token_keep_3",
+    "utf_token_keep_30",
     "numeric_index",
 ]
 VocabName: TypeAlias = Literal["o200k", "gemma4"]
@@ -27,7 +27,7 @@ ENCODINGS: tuple[EncodingName, ...] = (
     "raw_base64",
     "raw_uuid",
     "utf_token",
-    "utf_token_keep_3",
+    "utf_token_keep_30",
     "numeric_index",
 )
 IDENTIFIER_FIELD = "id"
@@ -48,7 +48,7 @@ IDENTIFIER_FORMAT_INSTRUCTIONS: dict[EncodingName, str] = {
         "Some ids may contain words or part of words, it's just a coincidence due to the use of tokens. "
         "Do not translate or fix typos in the ids. Transcribe them **verbatim**."
     ),
-    "utf_token_keep_3": (
+    "utf_token_keep_30": (
         "The ids are random LLM token sequences containing only ASCII alphanumeric or `_` characters. "
         "They always start *after* the key= prefix, and end *before* a new line."
         "Some ids may contain words or part of words, it's just a coincidence due to the use of tokens. "
@@ -117,10 +117,10 @@ def make_payload(seed: int, payload_bytes: int) -> bytes:
 
 
 def codec_for_condition(condition: EncodingCondition) -> IdTokenBiMap:
-    if condition.encoding == "utf_token_keep_3":
-        return IdTokenBiMap(condition.vocab, keep_bytes=3)
+    if condition.encoding == "utf_token_keep_30":
+        return IdTokenBiMap(condition.vocab)
     if condition.encoding == "utf_token":
-        return IdTokenBiMap(condition.vocab, keep_bytes=None)
+        return IdTokenBiMap(condition.vocab, keep_bits=None)
     return IdTokenBiMap(condition.vocab)
 
 
@@ -133,7 +133,7 @@ def render_identifier(payload: bytes, condition: EncodingCondition, codec: IdTok
         if len(payload) != 16:
             raise ValueError("UUID identifiers require 16-byte payloads")
         return str(UUID(bytes=payload))
-    if condition.encoding in ("utf_token", "utf_token_keep_3"):
+    if condition.encoding in ("utf_token", "utf_token_keep_30"):
         return codec.frombytes(payload)
     raise ValueError(f"Unsupported encoding {condition.encoding!r}")
 
@@ -410,7 +410,7 @@ def _is_format_valid(encoding: EncodingName, value: str, codec: IdTokenBiMap) ->
 
 
 def _matches_expected(sample: NiahSample, normalized: str, expected_normalized: str) -> bool:
-    if sample.encoding in ("utf_token", "utf_token_keep_3"):
+    if sample.encoding in ("utf_token", "utf_token_keep_30"):
         return sample.codec.tobytes(normalized, errors="fix") == bytes.fromhex(sample.payload_hex)
     return normalized == expected_normalized
 

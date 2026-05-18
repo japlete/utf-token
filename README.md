@@ -2,7 +2,7 @@
 
 Convert random string identifiers to a LLM-friendly format to reduce token usage in certain retrieval and agentic tasks.
 
-`utf-token` encodes the identifier into a 2-token sequence by default with 24 bits of entropy. Collisions are prevented automatically and the conversion is fully reversible.
+`utf-token` encodes the identifier into a 2-token sequence by default with 30 bits of entropy. Collisions are prevented automatically and the conversion is fully reversible.
 
 ![token savings vs hex, base64, and uuid](docs/assets/benchmarks/token_savings.png)
 
@@ -26,7 +26,7 @@ hex_str = "215aada34d0987ebfb9de132d913e46b"
 
 token_hex = bimap.fromhex(hex_str)
 print(token_hex)
-# 2 tokens: cripts 16
+# 2 tokens: ao 691
 
 reconstructed_hex = bimap.tohex(token_hex) # Recovers the original hex string
 ```
@@ -59,23 +59,23 @@ Pick the token vocabulary that matches the model you are using. Current options 
 bimap = IdTokenBiMap(vocab="gemma4")
 ```
 
-### Controlling how many bytes are encoded with `keep_bytes`
+### Controlling how many bits are encoded with `keep_bits`
 
-`IdTokenBiMap` takes `keep_bytes` at construction (default **3**):
+`IdTokenBiMap` takes `keep_bits` at construction (default **30**):
 
-- a positive integer: encode that many leading bytes (you get 1 token per 15 bits)
+- a positive integer that is a multiple of the vocab's `pair_index_bits` (15 for shipped vocabs): you get 1 token per 15 bits
 - `None` or `"all"`: encode the full input
 
 ```python
-short_bimap = IdTokenBiMap()                                     # keep_bytes=3
-longer_bimap = IdTokenBiMap(keep_bytes=4)
-full_bimap = IdTokenBiMap(keep_bytes="all")
+short_bimap = IdTokenBiMap()                                     # keep_bits=30
+longer_bimap = IdTokenBiMap(keep_bits=45)
+full_bimap = IdTokenBiMap(keep_bits="all")
 
 short = short_bimap.frombytes(b"\x01\x02\x03\x04\x05\x06")
 short_bimap.tobytes(short) == b"\x01\x02\x03\x04\x05\x06"        # reverse returns the full input
 ```
 
-Three bytes is enough entropy for retrieval workloads where you only need a handful of distinct identifiers visible to the model at once, and is also the minimum we recommend for the healing logic described below to stay reliable. Use a larger value if you need more in-context disambiguation.
+The default 30 bits (two full 15-bit chunks) is enough entropy for retrieval workloads where you only need a handful of distinct identifiers visible to the model at once, and is also the minimum we recommend for the healing logic described below to stay reliable. Use a larger multiple of 15 if you need more in-context disambiguation.
 
 ### Healing transcription errors on reverse lookup
 
@@ -106,10 +106,10 @@ from utf_token import fromhex
 
 my_hex = "215aada34d0987ebfb9de132d913e46b"
 encoded_hex = fromhex(my_hex)                            # full input
-short_hex = fromhex(my_hex, keep_bytes=3)                # only first 3 bytes
+short_hex = fromhex(my_hex, keep_bits=30)                 # top 30 MSBs
 ```
 
-Both `keep_bytes=None` and `keep_bytes="all"` keep the full input.
+Both `keep_bits=None` and `keep_bits="all"` keep the full input.
 
 For the standalone functions, pass the `vocab` parameter in the call.
 
@@ -128,14 +128,14 @@ To avoid confusion when your agent sees these IDs, you can adapt these instructi
 #### Other recommendations for maximum reliability in identifier retrieval
 
 1. Use consistent delimiters to clearly separate identifiers from other text in the prompt.
-2. Keep the default `keep_bytes=3` (or higher) so the healing logic has enough signal to disambiguate identifiers.
+2. Keep the default `keep_bits=30` (or a higher multiple of 15) so the healing logic has enough signal to disambiguate identifiers.
 3. Use structured outputs / JSON tools to request the identifiers. Provide a regex pattern such as `^[A-Za-z0-9_]+$` for the output strings in the JSON schema.
 4. Use smart models. For OpenAI, use at least GPT-5.4-mini (not nano). For Gemini, use at least Gemma 4. For Anthropic, use at least Haiku 4.5.
 5. Use low temperature if the model supports it.
 
 ## Retrieval benchmark
 
-A NIAH-style benchmark is included to test small LLMs (GPT-5.4-mini, Gemma 4, Claude Haiku) on retrieval accuracy. With 100 samples for each model, and both full-input and `keep_bytes=3` identifiers, the success rate is 100%. The context length is 32k tokens (calibrated for hex identifiers, then re-encoded for each encoding), and identifiers have 16 bytes of entropy.
+A NIAH-style benchmark is included to test small LLMs (GPT-5.4-mini, Gemma 4, Claude Haiku) on retrieval accuracy. With 100 samples for each model, and both full-input and default `keep_bits=30` identifiers, the success rate is 100%. The context length is 32k tokens (calibrated for hex identifiers, then re-encoded for each encoding), and identifiers have 16 bytes of entropy.
 
 See [`docs/benchmarks_niah.md`](docs/benchmarks_niah.md).
 
@@ -147,6 +147,4 @@ The synthetic NIAH benchmark was adapted from [NVIDIA/RULER](https://github.com/
 
 For 15-bit pair tables (both shipped vocabs) the encoder treats the input as an MSB-first bitstream, splits it into 15-bit chunks for the pair table, and uses the tail table for any 1–8 bit residual at the end. A 16-bit fast path is also implemented for any future vocabulary that can fill a 16-bit pair table under the curated `latin_16bit` recipe.
 
-`IdTokenBiMap` keeps a forward map and a reverse map so the generated string can be resolved back to the original bytes later. The default `keep_bytes=3` means each identifier consumes about two tokens regardless of its original size; reverse lookups still return the full bytes that were passed in.
-
-Collisions can happen when different inputs produce the same encoded string, especially when `keep_bytes` truncates them to a short prefix. When `IdTokenBiMap` sees that a new value would collide with an existing one, it deterministically moves to the next byte sequence until it finds an unused encoded string. The stored reverse map still points that generated string back to the original full input.
+`IdTokenBiMap` keeps a forward map and a reverse map so the generated string can be resolved back to the original bytes later. Collisions can happen when different inputs produce the same encoded string, especially when `keep_bits` truncates them to a short prefix. When `IdTokenBiMap` sees that a new value would collide with an existing one, it deterministically moves to the next prefix until it finds an unused encoded string. The stored reverse map still points that generated string back to the original full input.

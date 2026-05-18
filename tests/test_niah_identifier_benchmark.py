@@ -100,19 +100,19 @@ class NiahIdentifierBenchmarkTests(unittest.TestCase):
             IdTokenBiMap("o200k"),
         )
         utf_token_condition = EncodingCondition(encoding="utf_token", vocab="gemma4")
-        keep_3_condition = EncodingCondition(encoding="utf_token_keep_3", vocab="gemma4")
+        keep_30_condition = EncodingCondition(encoding="utf_token_keep_30", vocab="gemma4")
         utf_token_codec = codec_for_condition(utf_token_condition)
-        keep_3_codec = codec_for_condition(keep_3_condition)
+        keep_30_codec = codec_for_condition(keep_30_condition)
         utf_token_text = render_identifier(payload, utf_token_condition, utf_token_codec)
         truncated_utf_token_text = render_identifier(
-            payload, keep_3_condition, keep_3_codec
+            payload, keep_30_condition, keep_30_codec
         )
 
         self.assertEqual(bytes.fromhex(hex_text), payload)
         self.assertEqual(base64.b64decode(base64_text, validate=True), payload)
         self.assertEqual(UUID(uuid_text).bytes, payload)
         self.assertEqual(utf_token_codec.tobytes(utf_token_text), payload)
-        self.assertEqual(keep_3_codec.tobytes(truncated_utf_token_text), payload)
+        self.assertEqual(keep_30_codec.tobytes(truncated_utf_token_text), payload)
         self.assertNotEqual(truncated_utf_token_text, utf_token_text)
 
     def test_fixed_record_count_keeps_same_number_of_rows(self) -> None:
@@ -181,7 +181,7 @@ class NiahIdentifierBenchmarkTests(unittest.TestCase):
     def test_truncated_utf_token_scores_by_reversible_mapping(self) -> None:
         sample = generate_sample(
             BenchmarkConfig(context_length_target=50),
-            EncodingCondition(encoding="utf_token_keep_3", vocab="o200k"),
+            EncodingCondition(encoding="utf_token_keep_30", vocab="o200k"),
             sample_index=1,
             record_count=10,
             context_character_target=500,
@@ -291,7 +291,7 @@ class NiahIdentifierBenchmarkTests(unittest.TestCase):
             ("raw_base64", "o200k"),
             ("raw_uuid", "o200k"),
             ("utf_token", "gemma4"),
-            ("utf_token_keep_3", "gemma4"),
+            ("utf_token_keep_30", "gemma4"),
             ("numeric_index", "o200k"),
         ]
         for encoding, vocab in cases:

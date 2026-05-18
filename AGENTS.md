@@ -5,7 +5,7 @@ alwaysApply: true
 
 # UTF-Token utility
 
-This repo consists of a library (planned for Python and Typescript) that converts random bytes to a compact LLM-friendly string representation. The goals is to reduce token usage for LLM calls that require the model to read/write large amounts of common random strings, such as hashes, UUIDs and other identifiers.
+This repo consists of a Python library (planned for Typescript) that converts random bytes to a compact LLM-friendly string representation. The goals is to reduce token usage for LLM calls that require the model to read/write large amounts of common random strings, such as hashes, UUIDs and other identifiers.
 
 ## Tech stack
 
@@ -26,7 +26,6 @@ This repo consists of a library (planned for Python and Typescript) that convert
 - Never use `hasattr` or `getattr`, always use static checks, such as `uv run ruff check` and `uv run ty check`.
 - When changing which source or data files are packaged, locally verify the build with `uv build --no-build-isolation --sdist --wheel`, then install the built wheel into a fresh virtualenv and run `uv run --no-project --python <venv>/bin/python --script scripts/smoke_installed_package.py`.
 - Avoid try-except blocks for offline scripts if possible.
-- You can introduce breaking changes. The library is unpublished and the repo private.
 
 ## Repo structure
 
@@ -76,9 +75,5 @@ But the standalone functions are forward-only. From the resulting string of conc
 
 ## Roadmap
 
-1. Python library. Currently implementing features, benchmarks and docs.
-2. Typescript npm package. This will begin once the Python library is done.
+Typescript npm package: implementation pending.
 
-### Release status
-
-Repo still private, library unpublished.

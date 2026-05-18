@@ -8,6 +8,10 @@ version = "0.1.0"
 description = "LLM-friendly random byte sequence decoder"
 readme = "README.md"
 requires-python = ">=3.10"
+authors = [{ name="Jose A Poblete", email="jose.a.poblete@pm.me" }]
+keywords = ["context-engineering", "token-saving", "token-vocab", "agentic-rag", "agent-hook"]
+license = {file = "LICENSE"}
+urls = {Repository = "https://github.com/japlete/utf-token"}
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",

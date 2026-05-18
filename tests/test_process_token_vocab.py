@@ -216,25 +216,25 @@ class FilterCandidatesTests(unittest.TestCase):
     def test_filter_drops_tokens_longer_than_default_limit(self) -> None:
         recipe = _recipe_by_name("ascii_15bit")
         candidates = [
-            TokenEntry(rank=1, token_bytes=b"abcdefghij", token_text="abcdefghij"),
-            TokenEntry(rank=2, token_bytes=b"abcdefghijk", token_text="abcdefghijk"),
+            TokenEntry(rank=1, token_bytes=b"abcdef", token_text="abcdef"),
+            TokenEntry(rank=2, token_bytes=b"abcdefg", token_text="abcdefg"),
         ]
 
         kept = filter_candidates_for_recipe(candidates, recipe)
 
-        self.assertEqual([entry.token_text for entry in kept], ["abcdefghij"])
+        self.assertEqual([entry.token_text for entry in kept], ["abcdef"])
 
 
 class EvaluateRecipesTests(unittest.TestCase):
     def _build_candidates(self, count: int, prefix: str) -> list[Any]:
-        # Deterministic ASCII tokens that pass both recipe filters.
+        # Deterministic ASCII tokens that pass both recipe filters (max length 6).
         return [
             TokenEntry(rank=index, token_bytes=f"{prefix}{index}".encode("ascii"), token_text=f"{prefix}{index}")
             for index in range(count)
         ]
 
     def test_returns_first_feasible_recipe(self) -> None:
-        candidates = self._build_candidates(70_000, "tok")
+        candidates = self._build_candidates(70_000, "t")
         attempts, chosen = evaluate_recipes(candidates, selected_recipes=RECIPES)
         self.assertEqual([attempt.feasible for attempt in attempts], [True, True])
         self.assertIsNotNone(chosen)
@@ -245,7 +245,7 @@ class EvaluateRecipesTests(unittest.TestCase):
         self.assertEqual(len(tail_entries), recipe.tail_table_size)
 
     def test_falls_back_when_first_recipe_short(self) -> None:
-        candidates = self._build_candidates(40_000, "tok")
+        candidates = self._build_candidates(40_000, "t")
         attempts, chosen = evaluate_recipes(candidates, selected_recipes=RECIPES)
         self.assertEqual([attempt.feasible for attempt in attempts], [False, True])
         self.assertIsNotNone(chosen)

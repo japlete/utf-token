@@ -81,6 +81,8 @@ jobs:
           python-version: "3.10"
       - name: Create smoke-test environment
         run: uv venv --python 3.10 .venv-testpypi
+      - name: Wait for TestPyPI propagation
+        run: sleep 60
       - name: Install tagged package from TestPyPI
         env:
           RELEASE_VERSION: ${{ github.ref_name }}

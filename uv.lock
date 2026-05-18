@@ -15,7 +15,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-05-04T01:15:10.569166631Z"
+exclude-newer = "2026-05-04T01:19:59.138278969Z"
 exclude-newer-span = "P14D"
 
 [[package]]
@@ -2080,7 +2080,7 @@ wheels = [
 
 [[package]]
 name = "utf-token"
-version = "0.1.2"
+version = "0.1.3"
 source = { editable = "." }
 dependencies = [
     { name = "levenshtein" },

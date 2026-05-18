@@ -83,6 +83,8 @@ jobs:
           RELEASE_VERSION: ${{ github.ref_name }}
         run: >
           uv pip install
+          --no-config
+          --index-strategy unsafe-best-match
           --python .venv-testpypi/bin/python
           --default-index https://pypi.org/simple
           --index https://test.pypi.org/simple

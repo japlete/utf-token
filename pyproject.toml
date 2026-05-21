@@ -42,7 +42,7 @@ offline = [
 ]
 
 [tool.uv]
-exclude-newer = "14 days"
+exclude-newer = "7 days"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
